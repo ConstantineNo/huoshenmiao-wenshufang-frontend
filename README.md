@@ -13,6 +13,7 @@
 
 - 先建立最小 Vite + React + TypeScript 骨架
 - 后续按 docs 仓中的云边端 CONTRACT 对接 REST API
+- 当前已接入最小管理员登录入口，可调用 backend 的 `/api/v1/auth/admin/login` 并在浏览器持久化登录态
 
 部署策略：
 
@@ -35,6 +36,13 @@ npm run dev
 
 - 当前工作区的前端 npm / Vite 构建与排查默认在 Windows PowerShell 中执行。
 - 现有 WSL 环境因历史原因仍保留较旧系统与 Node.js / npm 版本，不作为 cloud-print-web 的主验证环境。
+
+当前 Web 入口状态：
+
+- 已提供管理员登录页。
+- 登录成功后会把 access token、管理员资料与 API Base URL 持久化到浏览器 localStorage。
+- 页面刷新后会自动恢复最近一次管理员登录态。
+- 登录后的管理台当前为壳层页面，下一步继续接模板上传、模板配置、节点与打印流程。
 
 服务端部署入口：
 
