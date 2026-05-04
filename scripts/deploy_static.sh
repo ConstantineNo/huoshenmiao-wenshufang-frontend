@@ -6,22 +6,10 @@ APP_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 ENV_FILE="$APP_ROOT/deploy/runtime/cloud-print-web.env"
 ENV_EXAMPLE="$APP_ROOT/deploy/runtime/cloud-print-web.env.example"
 NGINX_TEMPLATE="$APP_ROOT/deploy/nginx/cloud-print-web.conf"
+DIST_DIR="$APP_ROOT/dist"
 
-if ! command -v npm >/dev/null 2>&1; then
-  echo "npm is required"
-  exit 1
-fi
-
-if ! command -v node >/dev/null 2>&1; then
-  echo "node is required"
-  exit 1
-fi
-
-MIN_NODE_VERSION="20.19.0"
-NODE_VERSION="$(node -p 'process.versions.node')"
-
-if [ "$(printf '%s\n' "$MIN_NODE_VERSION" "$NODE_VERSION" | sort -V | head -n1)" != "$MIN_NODE_VERSION" ]; then
-  echo "node >= $MIN_NODE_VERSION is required, current version is $NODE_VERSION"
+if [ ! -d "$DIST_DIR" ]; then
+  echo "dist directory is required; CI should upload built frontend assets before deploy"
   exit 1
 fi
 
@@ -57,11 +45,8 @@ NGINX_SITE_PATH="$NGINX_SITE_AVAILABLE_DIR/$NGINX_SITE_NAME"
 NGINX_LINK_PATH="$NGINX_SITE_ENABLED_DIR/$NGINX_SITE_NAME"
 LE_LIVE_DIR="/etc/letsencrypt/live/$FRONTEND_DOMAIN"
 
-npm ci
-npm run build
-
 mkdir -p "$FRONTEND_DEPLOY_DIR"
-rsync -av --delete "$APP_ROOT/dist/" "$FRONTEND_DEPLOY_DIR/"
+rsync -av --delete "$DIST_DIR/" "$FRONTEND_DEPLOY_DIR/"
 mkdir -p "$FRONTEND_DEPLOY_DIR/.well-known/acme-challenge"
 
 render_https_conf() {

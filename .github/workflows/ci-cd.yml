@@ -30,6 +30,13 @@ jobs:
       - name: Build frontend
         run: npm run build
 
+      - name: Upload dist artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: cloud-print-web-dist
+          path: dist
+          if-no-files-found: error
+
   deploy:
     needs: [lint-and-build]
     runs-on: ubuntu-latest
@@ -39,14 +46,20 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Upload project files to server
+      - name: Download dist artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: cloud-print-web-dist
+          path: dist
+
+      - name: Upload deploy files to server
         uses: appleboy/scp-action@v0.1.7
         with:
           host: ${{ secrets.DEPLOY_HOST }}
           username: ${{ secrets.DEPLOY_USER }}
           key: ${{ secrets.DEPLOY_KEY }}
           port: ${{ secrets.DEPLOY_PORT || 22 }}
-          source: ".github,deploy,public,src,index.html,package.json,package-lock.json,tsconfig.json,tsconfig.app.json,vite.config.ts,README.md,scripts,.gitignore"
+          source: "deploy,scripts,dist,README.md"
           target: ${{ secrets.DEPLOY_PATH }}
           rm: false
 
