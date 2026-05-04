@@ -17,7 +17,7 @@
 部署策略：
 
 - 运行环境为 Linux 服务器上的静态文件目录
-- CI/CD 通过 GitHub Actions 触发 SSH 到服务器执行构建与发布脚本
+- CI/CD 通过 GitHub Actions 先上传当前仓库源码，再通过 SSH 在服务器执行构建与发布脚本
 - 服务器静态文件服务建议使用 Nginx
 - 当前生产域名固定为 print.1to.top
 - HTTPS 证书通过 certbot 自动申请与续期
@@ -41,4 +41,9 @@ npm run dev
 - scripts/deploy_static.sh
 - deploy/runtime/cloud-print-web.env.example
 - deploy/nginx/cloud-print-web.conf
+
+首次部署说明：
+
+- deploy job 不再要求服务器上的 DEPLOY_PATH 预先是一个 git 仓库。
+- GitHub Actions 会先把当前仓库源码上传到 DEPLOY_PATH，再由服务器本地执行 npm 构建、Nginx 配置刷新和 certbot 申请证书。
 
