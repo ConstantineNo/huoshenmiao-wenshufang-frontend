@@ -48,6 +48,17 @@ function readDefaultApiBaseUrl() {
   if (typeof envValue === 'string' && envValue.trim()) {
     return normalizeApiBaseUrl(envValue)
   }
+
+  if (typeof window !== 'undefined') {
+    const { hostname } = window.location
+    if (hostname === 'print.1to.top') {
+      return 'https://api.print.1to.top'
+    }
+    if (hostname === 'localhost' || hostname === '127.0.0.1') {
+      return 'http://127.0.0.1:18080'
+    }
+  }
+
   return 'http://127.0.0.1:18080'
 }
 
@@ -79,7 +90,7 @@ function persistSession(session: PersistedSession | null) {
 
 function App() {
   const [apiBaseUrl, setApiBaseUrl] = useState(readDefaultApiBaseUrl)
-  const [userName, setUserName] = useState('admin')
+  const [userName, setUserName] = useState('admin_test')
   const [password, setPassword] = useState('')
   const [session, setSession] = useState<PersistedSession | null>(null)
   const [isSubmitting, setIsSubmitting] = useState(false)
@@ -176,7 +187,7 @@ function App() {
         if (detail === 'admin_inactive') {
           throw new Error('当前管理员账号已被停用。')
         }
-        throw new Error('登录失败，请检查后端地址和服务状态。')
+        throw new Error('登录失败，请检查后端地址、跨域配置和服务状态。')
       }
 
       const payload = (await response.json()) as LoginResponse
