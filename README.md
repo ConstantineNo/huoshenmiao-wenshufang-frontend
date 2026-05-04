@@ -19,6 +19,10 @@
 - 运行环境为 Linux 服务器上的静态文件目录
 - CI/CD 通过 GitHub Actions 触发 SSH 到服务器执行构建与发布脚本
 - 服务器静态文件服务建议使用 Nginx
+- 当前生产域名固定为 print.1to.top
+- HTTPS 证书通过 certbot 自动申请与续期
+- Nginx 最大上传限制固定为 100m
+- 服务器 Node.js 版本需满足 Vite 要求，建议固定为 Node 22 LTS
 
 开发启动建议：
 
@@ -26,6 +30,11 @@
 npm install
 npm run dev
 ```
+
+本地环境说明：
+
+- 当前工作区的前端 npm / Vite 构建与排查默认在 Windows PowerShell 中执行。
+- 现有 WSL 环境因历史原因仍保留较旧系统与 Node.js / npm 版本，不作为 cloud-print-web 的主验证环境。
 
 服务端部署入口：
 
