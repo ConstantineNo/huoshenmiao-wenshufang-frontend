@@ -213,6 +213,9 @@ function App() {
   const [preflightResult, setPreflightResult] = useState<PreflightResult | null>(null)
   const [runningPreflight, setRunningPreflight] = useState(false)
   const [activeStep, setActiveStep] = useState(1)
+  const [pdfBlobUrl, setPdfBlobUrl] = useState<string | null>(null)
+  const [pdfLoading, setPdfLoading] = useState(false)
+  const [pdfError, setPdfError] = useState('')
 
   useEffect(() => {
     const persisted = readPersistedSession()
@@ -485,7 +488,7 @@ function App() {
     }
   }
 
-  function handleSelectTemplate(item: TemplateSummary) {
+  async function handleSelectTemplate(item: TemplateSummary) {
     setActiveTemplateId(item.id)
     setScanResult(null)
     setScanError('')
@@ -493,6 +496,74 @@ function App() {
     setTableDraft(null)
     setPreflightResult(null)
     setActiveStep(1)
+    setPdfBlobUrl(null)
+    setPdfError('')
+
+    if (!session) return
+
+    try {
+      const scanResp = await fetch(`${session.apiBaseUrl}/api/v1/templates/${item.id}/scan-result`, {
+        headers: { Authorization: `Bearer ${session.accessToken}` },
+      })
+      if (scanResp.ok) {
+        const data = await scanResp.json()
+        if (data.scanned) {
+          setScanResult({
+            template_id: data.template_id,
+            template_version_id: data.template_version_id,
+            editable_segments: data.editable_segments,
+            text_blocks: data.text_blocks,
+            found_placeholders: data.found_placeholders,
+            found_regions: data.found_regions,
+            issues: data.issues,
+          })
+          if (data.field_schema?.length) {
+            setFields(data.field_schema as FieldDefinition[])
+          }
+        }
+      }
+
+      const previewResp = await fetch(`${session.apiBaseUrl}/api/v1/templates/${item.id}/preview`, {
+        headers: { Authorization: `Bearer ${session.accessToken}` },
+      })
+      if (previewResp.ok) {
+        const previewData = await previewResp.json()
+        if (previewData.rows?.length || previewData.columns?.length) {
+          setTableDraft(previewData as TableDraftResponse)
+        }
+      }
+    } catch {
+      // silently ignore — user can re-scan
+    }
+  }
+
+  async function loadPdfPreview() {
+    if (!session || !activeTemplateId) return
+    setPdfLoading(true)
+    setPdfError('')
+    setPdfBlobUrl(null)
+    try {
+      const resp = await fetch(
+        `${session.apiBaseUrl}/api/v1/templates/${activeTemplateId}/preview.pdf`,
+        { headers: { Authorization: `Bearer ${session.accessToken}` } },
+      )
+      if (!resp.ok) {
+        const detail = (await resp.json().catch(() => null)) as { detail?: string } | null
+        if (detail?.detail === 'pdf_preview_unavailable') {
+          setPdfError('当前服务器环境不支持 PDF 预览（需要 LibreOffice 或 Word）。')
+        } else {
+          setPdfError('PDF 预览加载失败。')
+        }
+        return
+      }
+      const blob = await resp.blob()
+      if (pdfBlobUrl) URL.revokeObjectURL(pdfBlobUrl)
+      setPdfBlobUrl(URL.createObjectURL(blob))
+    } catch {
+      setPdfError('PDF 预览加载失败，请确认后端服务正常。')
+    } finally {
+      setPdfLoading(false)
+    }
   }
 
   function handleBackToList() {
@@ -503,6 +574,8 @@ function App() {
     setTableDraft(null)
     setPreflightResult(null)
     setActiveStep(1)
+    setPdfBlobUrl(null)
+    setPdfError('')
   }
 
   const activeTemplate = templates.find((t) => t.id === activeTemplateId)
@@ -814,6 +887,7 @@ function App() {
                           if (!rows.length) return
                           handleSaveTableDraft(activeTemplate.template_version_id, { active_row_key: tableDraft?.active_row_key || rows[0].row_key, rows })
                           setActiveStep(4)
+                          void loadPdfPreview()
                         }}>{savingDraft ? '保存中...' : '保存并预览'}</button>
                     </div>
                   </>
@@ -823,27 +897,36 @@ function App() {
 
             {activeStep === 4 && scanResult && (
               <div className="stage-panel">
-                <h3 style={{ margin: '0 0 12px' }}>打印预览</h3>
-                <div className="preview-pdf-container">
-                  <iframe
-                    src={`${session.apiBaseUrl}/api/v1/templates/${activeTemplate.id}/preview.pdf`}
-                    title="PDF 预览"
-                  />
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
+                  <h3 style={{ margin: 0 }}>打印预览</h3>
+                  <button type="button" className="ghost-button" disabled={pdfLoading}
+                    onClick={() => { void loadPdfPreview() }}>刷新预览</button>
                 </div>
-                {tableDraft?.preview?.blocks && tableDraft.preview.blocks.length > 0 && (
-                  <details style={{ marginTop: 14 }}>
-                    <summary style={{ cursor: 'pointer', fontSize: 13, color: 'var(--color-text-secondary)' }}>文字对照</summary>
-                    <div className="preview-fallback" style={{ marginTop: 8 }}>
-                      {tableDraft.preview.blocks.map(blk => (
-                        <p key={blk.block_key} style={{ margin: '0 0 4px', whiteSpace: 'pre-wrap' }}>
-                          {blk.runs.map((run, ri) => (
-                            <span key={ri} className={run.editable ? 'preview-editable' : ''} title={run.field_key}>{run.text}</span>
+                {pdfLoading ? (
+                  <p className="empty-state" style={{ padding: 40, textAlign: 'center' }}>正在生成 PDF 预览...</p>
+                ) : pdfError ? (
+                  <div>
+                    <p className="error-banner">{pdfError}</p>
+                    {tableDraft?.preview?.blocks && tableDraft.preview.blocks.length > 0 && (
+                      <details style={{ marginTop: 14 }}>
+                        <summary style={{ cursor: 'pointer', fontSize: 13, color: 'var(--color-text-secondary)' }}>文字对照</summary>
+                        <div className="preview-fallback" style={{ marginTop: 8 }}>
+                          {tableDraft.preview.blocks.map(blk => (
+                            <p key={blk.block_key} style={{ margin: '0 0 4px', whiteSpace: 'pre-wrap' }}>
+                              {blk.runs.map((run, ri) => (
+                                <span key={ri} className={run.editable ? 'preview-editable' : ''} title={run.field_key}>{run.text}</span>
+                              ))}
+                            </p>
                           ))}
-                        </p>
-                      ))}
-                    </div>
-                  </details>
-                )}
+                        </div>
+                      </details>
+                    )}
+                  </div>
+                ) : pdfBlobUrl ? (
+                  <div className="preview-pdf-container">
+                    <iframe src={pdfBlobUrl} title="PDF 预览" />
+                  </div>
+                ) : null}
               </div>
             )}
           </article>
