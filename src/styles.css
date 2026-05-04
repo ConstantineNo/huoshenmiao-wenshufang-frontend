@@ -251,6 +251,92 @@ p {
   grid-column: 1 / -1;
 }
 
+.template-workspace {
+  margin-top: 16px;
+  display: grid;
+  grid-template-columns: minmax(280px, 360px) minmax(0, 1fr);
+  gap: 18px;
+}
+
+.upload-form,
+.template-list-panel {
+  padding: 18px;
+  border-radius: 20px;
+  background: rgba(244, 247, 251, 0.88);
+}
+
+.upload-form {
+  display: grid;
+  gap: 14px;
+  align-content: start;
+}
+
+.upload-hint,
+.empty-state,
+.template-list-header p,
+.table-subtext {
+  color: #58657f;
+  font-size: 14px;
+}
+
+.info-banner {
+  padding: 12px 14px;
+  border-radius: 14px;
+  background: rgba(27, 94, 32, 0.08);
+  color: #1f6b33;
+  font-size: 14px;
+}
+
+.template-list-header {
+  display: flex;
+  gap: 16px;
+  justify-content: space-between;
+  align-items: flex-start;
+}
+
+.template-list-header h3 {
+  margin: 0;
+}
+
+.template-list-header p {
+  margin-top: 6px;
+}
+
+.template-table-wrap {
+  margin-top: 16px;
+  overflow-x: auto;
+}
+
+.template-table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+.template-table th,
+.template-table td {
+  padding: 14px 12px;
+  text-align: left;
+  border-bottom: 1px solid rgba(118, 133, 160, 0.16);
+  vertical-align: top;
+}
+
+.template-table th {
+  font-size: 12px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: #748199;
+}
+
+.template-table strong {
+  display: block;
+}
+
+.table-subtext {
+  display: block;
+  margin-top: 6px;
+  word-break: break-all;
+}
+
 .roadmap-grid {
   margin-top: 16px;
   display: grid;
@@ -275,7 +361,8 @@ p {
 
   .login-layout,
   .grid-board,
-  .roadmap-grid {
+  .roadmap-grid,
+  .template-workspace {
     grid-template-columns: 1fr;
   }
 
@@ -295,5 +382,9 @@ p {
   .identity-chip {
     width: 100%;
     box-sizing: border-box;
+  }
+
+  .template-list-header {
+    flex-direction: column;
   }
 }

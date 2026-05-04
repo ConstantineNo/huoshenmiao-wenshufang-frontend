@@ -23,6 +23,20 @@ type PersistedSession = {
   apiBaseUrl: string
 }
 
+type TemplateSummary = {
+  id: string
+  name: string
+  source_type: string
+  status: string
+  template_version_id: string
+  version_no: number
+  source_file_url: string
+  checksum: string
+  field_count: number
+  created_at: string
+  updated_at: string
+}
+
 const SESSION_STORAGE_KEY = 'cloud-print-web/admin-session'
 
 function normalizeApiBaseUrl(value: string) {
@@ -70,6 +84,13 @@ function App() {
   const [session, setSession] = useState<PersistedSession | null>(null)
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [errorMessage, setErrorMessage] = useState('')
+  const [templates, setTemplates] = useState<TemplateSummary[]>([])
+  const [templatesLoading, setTemplatesLoading] = useState(false)
+  const [templatesError, setTemplatesError] = useState('')
+  const [templateName, setTemplateName] = useState('')
+  const [templateFile, setTemplateFile] = useState<File | null>(null)
+  const [uploadingTemplate, setUploadingTemplate] = useState(false)
+  const [uploadMessage, setUploadMessage] = useState('')
 
   useEffect(() => {
     const persisted = readPersistedSession()
@@ -79,6 +100,53 @@ function App() {
     setSession(persisted)
     setApiBaseUrl(persisted.apiBaseUrl)
   }, [])
+
+  useEffect(() => {
+    if (!session) {
+      setTemplates([])
+      setTemplatesError('')
+      return
+    }
+
+    const activeSession = session
+
+    let cancelled = false
+
+    async function loadTemplates() {
+      setTemplatesLoading(true)
+      setTemplatesError('')
+      try {
+        const response = await fetch(`${activeSession.apiBaseUrl}/api/v1/templates`, {
+          headers: {
+            Authorization: `Bearer ${activeSession.accessToken}`,
+          },
+        })
+
+        if (!response.ok) {
+          throw new Error('模板列表读取失败，请确认登录状态和后端服务。')
+        }
+
+        const payload = (await response.json()) as { items: TemplateSummary[] }
+        if (!cancelled) {
+          setTemplates(payload.items)
+        }
+      } catch (error) {
+        if (!cancelled) {
+          setTemplatesError(error instanceof Error ? error.message : '模板列表读取失败。')
+        }
+      } finally {
+        if (!cancelled) {
+          setTemplatesLoading(false)
+        }
+      }
+    }
+
+    void loadTemplates()
+
+    return () => {
+      cancelled = true
+    }
+  }, [session])
 
   async function handleSubmit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault()
@@ -133,6 +201,81 @@ function App() {
     setSession(null)
     setPassword('')
     setErrorMessage('')
+    setTemplateFile(null)
+    setTemplateName('')
+    setUploadMessage('')
+  }
+
+  async function refreshTemplates() {
+    if (!session) {
+      return
+    }
+
+    setTemplatesLoading(true)
+    setTemplatesError('')
+    try {
+      const response = await fetch(`${session.apiBaseUrl}/api/v1/templates`, {
+        headers: {
+          Authorization: `Bearer ${session.accessToken}`,
+        },
+      })
+      if (!response.ok) {
+        throw new Error('模板列表刷新失败。')
+      }
+      const payload = (await response.json()) as { items: TemplateSummary[] }
+      setTemplates(payload.items)
+    } catch (error) {
+      setTemplatesError(error instanceof Error ? error.message : '模板列表刷新失败。')
+    } finally {
+      setTemplatesLoading(false)
+    }
+  }
+
+  async function handleTemplateUpload(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+    if (!session) {
+      return
+    }
+    if (!templateFile) {
+      setUploadMessage('请选择要上传的模板文件。')
+      return
+    }
+
+    setUploadingTemplate(true)
+    setUploadMessage('')
+    const formData = new FormData()
+    formData.set('name', templateName.trim() || templateFile.name.replace(/\.[^.]+$/, ''))
+    formData.set('file', templateFile)
+
+    try {
+      const response = await fetch(`${session.apiBaseUrl}/api/v1/templates`, {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${session.accessToken}`,
+        },
+        body: formData,
+      })
+
+      if (!response.ok) {
+        const payload = (await response.json().catch(() => null)) as { detail?: string } | null
+        if (payload?.detail === 'unsupported_template_type') {
+          throw new Error('当前只支持上传 .docx、.html、.pdf 模板文件。')
+        }
+        if (payload?.detail === 'template_file_required') {
+          throw new Error('后端未收到模板文件，请重新选择后上传。')
+        }
+        throw new Error('模板上传失败，请检查后端服务与管理员登录状态。')
+      }
+
+      setUploadMessage('模板上传成功，已写入云端模板列表。')
+      setTemplateName('')
+      setTemplateFile(null)
+      await refreshTemplates()
+    } catch (error) {
+      setUploadMessage(error instanceof Error ? error.message : '模板上传失败。')
+    } finally {
+      setUploadingTemplate(false)
+    }
   }
 
   const dashboard = session ? (
@@ -165,6 +308,7 @@ function App() {
             <li>管理员登录已接入 backend 接口</li>
             <li>access token 已持久化到浏览器 localStorage</li>
             <li>页面刷新后会自动恢复最近一次登录态</li>
+            <li>模板上传与模板列表最小链路已经接通</li>
           </ul>
         </article>
 
@@ -187,11 +331,96 @@ function App() {
         </article>
 
         <article className="panel-card wide-card">
+          <p className="panel-kicker">模板中心</p>
+          <div className="template-workspace">
+            <form className="upload-form" onSubmit={handleTemplateUpload}>
+              <div className="field-group">
+                <label htmlFor="template-name">模板名称</label>
+                <input
+                  id="template-name"
+                  value={templateName}
+                  onChange={(event) => setTemplateName(event.target.value)}
+                  placeholder="例如：借据模板"
+                />
+              </div>
+
+              <div className="field-group">
+                <label htmlFor="template-file">模板文件</label>
+                <input
+                  id="template-file"
+                  type="file"
+                  accept=".docx,.html,.pdf"
+                  onChange={(event) => setTemplateFile(event.target.files?.[0] ?? null)}
+                />
+              </div>
+
+              <p className="upload-hint">当前最小支持格式：.docx、.html、.pdf</p>
+
+              {uploadMessage ? <p className="info-banner">{uploadMessage}</p> : null}
+
+              <button type="submit" className="primary-button" disabled={uploadingTemplate}>
+                {uploadingTemplate ? '上传中...' : '上传模板'}
+              </button>
+            </form>
+
+            <section className="template-list-panel">
+              <div className="template-list-header">
+                <div>
+                  <h3>模板列表</h3>
+                  <p>上传成功后，这里会立刻显示 backend 当前保存的模板记录。</p>
+                </div>
+                <button type="button" className="ghost-button" onClick={() => void refreshTemplates()}>
+                  刷新列表
+                </button>
+              </div>
+
+              {templatesError ? <p className="error-banner">{templatesError}</p> : null}
+
+              {templatesLoading ? <p className="empty-state">正在读取模板列表...</p> : null}
+
+              {!templatesLoading && templates.length === 0 ? (
+                <p className="empty-state">当前还没有模板。先上传一个模板，确认 Web 到 backend 的业务链路已经打通。</p>
+              ) : null}
+
+              {templates.length > 0 ? (
+                <div className="template-table-wrap">
+                  <table className="template-table">
+                    <thead>
+                      <tr>
+                        <th>模板名称</th>
+                        <th>类型</th>
+                        <th>状态</th>
+                        <th>版本</th>
+                        <th>更新时间</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {templates.map((item) => (
+                        <tr key={item.id}>
+                          <td>
+                            <strong>{item.name}</strong>
+                            <span className="table-subtext">{item.id}</span>
+                          </td>
+                          <td>{item.source_type}</td>
+                          <td>{item.status}</td>
+                          <td>v{item.version_no}</td>
+                          <td>{new Date(item.updated_at).toLocaleString('zh-CN')}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              ) : null}
+            </section>
+          </div>
+        </article>
+
+        <article className="panel-card wide-card">
           <p className="panel-kicker">下一批接入项</p>
           <div className="roadmap-grid">
             <section>
-              <h3>模板中心</h3>
-              <p>上传模板、触发扫描、保存字段配置、发布模板版本。</p>
+              <h3>模板扫描</h3>
+              <p>把旧 print-engine 的扫描能力迁到 cloud-print-server，生成可配置字段草稿。</p>
             </section>
             <section>
               <h3>边缘节点</h3>
@@ -219,6 +448,7 @@ function App() {
             <li>管理员账号密码登录</li>
             <li>登录态持久化</li>
             <li>刷新后自动恢复管理台入口</li>
+            <li>登录后直接测试模板上传与模板列表</li>
           </ul>
         </div>
       </div>
@@ -241,7 +471,7 @@ function App() {
             id="user-name"
             value={userName}
             onChange={(event) => setUserName(event.target.value)}
-            placeholder="admin"
+            placeholder="admin_test"
             autoComplete="username"
           />
         </div>
@@ -257,6 +487,8 @@ function App() {
             autoComplete="current-password"
           />
         </div>
+
+        <p className="upload-hint">默认测试管理员示例：admin_test / Test123456!</p>
 
         {errorMessage ? <p className="error-banner">{errorMessage}</p> : null}
 
