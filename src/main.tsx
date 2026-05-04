@@ -216,7 +216,7 @@ function App() {
   const [pdfBlobUrl, setPdfBlobUrl] = useState<string | null>(null)
   const [pdfLoading, setPdfLoading] = useState(false)
   const [pdfError, setPdfError] = useState('')
-  const [fontStatus, setFontStatus] = useState<{ compatible: boolean; missing: string[]; template_fonts: string[] } | null>(null)
+  const [fontStatus, setFontStatus] = useState<{ compatible: boolean; missing: { name: string; substitute: string }[]; template_fonts: string[] } | null>(null)
   const [checkingFonts, setCheckingFonts] = useState(false)
   const [uploadingFont, setUploadingFont] = useState(false)
   const [fontUploadMsg, setFontUploadMsg] = useState('')
@@ -842,17 +842,32 @@ function App() {
                     )}
                     {fontStatus && !fontStatus.compatible && (
                       <div className="font-warning" style={{ marginTop: 14, padding: 16, borderRadius: 10, background: '#fef8e7', border: '1px solid #f0c36d' }}>
-                        <p style={{ margin: '0 0 8px', fontWeight: 700, color: '#b85c0e' }}>⚠ 字体兼容性警告</p>
-                        <p style={{ margin: '0 0 8px', fontSize: 13, color: '#5b5b5b' }}>
-                          模板使用了服务器上未安装的字体：<strong>{fontStatus.missing.join('、')}</strong>。
-                          PDF 预览可能出现排版偏移或字体回退。
+                        <p style={{ margin: '0 0 10px', fontWeight: 700, color: '#b85c0e' }}>⚠ 字体兼容性警告</p>
+                        <p style={{ margin: '0 0 10px', fontSize: 13, color: '#5b5b5b' }}>
+                          以下字体在服务器上不存在，PDF 预览将使用替代字体：
                         </p>
+                        <table style={{ width: '100%', borderCollapse: 'collapse', marginBottom: 12, fontSize: 13 }}>
+                          <thead>
+                            <tr style={{ borderBottom: '1px solid #f0c36d' }}>
+                              <th style={{ textAlign: 'left', padding: '4px 8px', color: '#8a611c' }}>模板字体</th>
+                              <th style={{ textAlign: 'left', padding: '4px 8px', color: '#8a611c' }}>→ 替代字体</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {fontStatus.missing.map(f => (
+                              <tr key={f.name} style={{ borderBottom: '1px solid #f5e6c8' }}>
+                                <td style={{ padding: '6px 8px', fontWeight: 500 }}>{f.name}</td>
+                                <td style={{ padding: '6px 8px', color: '#5b5b5b' }}>{f.substitute}</td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
                         <div style={{ display: 'flex', gap: 8 }}>
-                          <button type="button" className="ghost-button" style={{ fontSize: 13 }}
+                          <button type="button" className="primary-button" style={{ fontSize: 13 }}
                             onClick={() => setFontStatus({ ...fontStatus, compatible: true })}>
-                            使用替代字体继续
+                            使用替代字体，继续预览
                           </button>
-                          <label className="primary-button" style={{ fontSize: 13, cursor: 'pointer', display: 'inline-flex' }}>
+                          <label className="ghost-button" style={{ fontSize: 13, cursor: 'pointer', display: 'inline-flex' }}>
                             {uploadingFont ? '上传中...' : '上传缺失字体 (.ttf/.otf)'}
                             <input type="file" accept=".ttf,.otf,.ttc" style={{ display: 'none' }}
                               onChange={e => { const f = e.target.files?.[0]; if (f) handleFontUpload(f) }}
