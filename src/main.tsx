@@ -571,14 +571,24 @@ function App() {
     try {
       const formData = new FormData()
       formData.set('file', file)
-      const resp = await fetch(`${session.apiBaseUrl}/api/v1/system/fonts`, {
+      let url = `${session.apiBaseUrl}/api/v1/system/fonts`
+      if (activeTemplateId) {
+        url += `?for_template_id=${encodeURIComponent(activeTemplateId)}`
+      }
+      const resp = await fetch(url, {
         method: 'POST',
         headers: { Authorization: `Bearer ${session.accessToken}` },
         body: formData,
       })
       if (resp.ok) {
-        setFontUploadMsg(`${file.name} 上传成功，字体将在下次 PDF 预览时生效。`)
-        // Re-check fonts for current template
+        const data = await resp.json()
+        const aliases = data.aliases_created as Record<string, string> | undefined
+        if (aliases && Object.keys(aliases).length > 0) {
+          const mappings = Object.entries(aliases).map(([k, v]) => `${k} → ${v}`).join('、')
+          setFontUploadMsg(`${file.name} 上传成功，已建立字体映射：${mappings}`)
+        } else {
+          setFontUploadMsg(`${file.name} 上传成功，字体族名：${(data.font_families as string[]).join(', ') || '未知'}`)
+        }
         if (activeTemplateId) {
           await handleFontCheck(activeTemplateId)
         }
