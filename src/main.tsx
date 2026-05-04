@@ -125,7 +125,8 @@ type PreflightResult = {
   issues: ScanIssue[]
 }
 
-type AgentInfo = { id: string; name: string; hostname: string; status: string; last_seen_at: string | null; created_at: string }
+type AgentInfo = { id: string; name: string; hostname: string; status: string; last_seen_at: string | null; created_at: string; printer_count: number }
+type AgentPrinter = { id: string; name: string; system_name: string; status: string; capabilities: Record<string, unknown>; last_seen_at: string }
 
 const SESSION_STORAGE_KEY = 'cloud-print-web/admin-session'
 
@@ -224,6 +225,9 @@ function App() {
   const [fontUploadMsg, setFontUploadMsg] = useState('')
   const [agents, setAgents] = useState<AgentInfo[]>([])
   const [agentsLoading, setAgentsLoading] = useState(false)
+  const [expandedAgent, setExpandedAgent] = useState<string | null>(null)
+  const [agentPrinters, setAgentPrinters] = useState<AgentPrinter[]>([])
+  const [printersLoading, setPrintersLoading] = useState(false)
 
   useEffect(() => {
     const persisted = readPersistedSession()
@@ -295,6 +299,31 @@ function App() {
       }
     } catch { /* ignore */ }
     finally { setAgentsLoading(false) }
+  }
+
+  async function loadAgentPrinters(agentId: string) {
+    if (!session) return
+    setPrintersLoading(true)
+    try {
+      const resp = await fetch(`${session.apiBaseUrl}/api/v1/admin/agents/${agentId}/printers`, {
+        headers: { Authorization: `Bearer ${session.accessToken}` },
+      })
+      if (resp.ok) {
+        const data = await resp.json()
+        setAgentPrinters(data.items as AgentPrinter[])
+      }
+    } catch { /* ignore */ }
+    finally { setPrintersLoading(false) }
+  }
+
+  function toggleAgent(agentId: string) {
+    if (expandedAgent === agentId) {
+      setExpandedAgent(null)
+      setAgentPrinters([])
+    } else {
+      setExpandedAgent(agentId)
+      void loadAgentPrinters(agentId)
+    }
   }
 
   async function handleSubmit(event: React.FormEvent<HTMLFormElement>) {
@@ -735,18 +764,47 @@ function App() {
             <div style={{ marginTop: 10 }}>
               <table className="template-table">
                 <thead><tr>
-                  <th>节点名称</th><th>主机名</th><th>状态</th><th>最后心跳</th>
+                  <th>节点名称</th><th>打印机</th><th>状态</th><th>最后心跳</th>
                 </tr></thead>
                 <tbody>
                   {agents.map(a => {
                     const online = a.last_seen_at ? (Date.now() - new Date(a.last_seen_at).getTime()) < 120000 : false
+                    const expanded = expandedAgent === a.id
                     return (
-                      <tr key={a.id}>
-                        <td><strong>{a.name}</strong><span className="table-subtext">{a.id}</span></td>
-                        <td>{a.hostname}</td>
-                        <td><span style={{ color: online ? '#1b7a3d' : '#c62828', fontWeight: 600 }}>{online ? '● 在线' : '○ 离线'}</span></td>
-                        <td>{a.last_seen_at ? new Date(a.last_seen_at).toLocaleString('zh-CN') : '从未'}</td>
-                      </tr>
+                      <React.Fragment key={a.id}>
+                        <tr onClick={() => toggleAgent(a.id)} style={{ cursor: 'pointer' }} className={expanded ? 'selected-row' : ''}>
+                          <td>
+                            <strong>{a.name}</strong>
+                            <span className="table-subtext">{a.hostname}</span>
+                          </td>
+                          <td style={{ color: '#5b677b' }}>{a.printer_count || 0} 台</td>
+                          <td><span style={{ color: online ? '#1b7a3d' : '#c62828', fontWeight: 600 }}>{online ? '● 在线' : '○ 离线'}</span></td>
+                          <td>{a.last_seen_at ? new Date(a.last_seen_at).toLocaleString('zh-CN') : '从未'}</td>
+                        </tr>
+                        {expanded && (
+                          <tr><td colSpan={4} style={{ padding: '0 14px 10px' }}>
+                            {printersLoading ? (
+                              <span className="upload-hint">加载中...</span>
+                            ) : agentPrinters.length === 0 ? (
+                              <span className="upload-hint">暂无打印机上报</span>
+                            ) : (
+                              <table style={{ width: '100%', fontSize: 12, borderCollapse: 'collapse' }}>
+                                <tbody>
+                                  {agentPrinters.map(p => (
+                                    <tr key={p.id} style={{ borderBottom: '1px solid #efede8' }}>
+                                      <td style={{ padding: '4px 8px', fontWeight: 500 }}>{p.name}</td>
+                                      <td style={{ padding: '4px 8px', color: '#8894aa' }}>{p.system_name}</td>
+                                      <td style={{ padding: '4px 8px' }}>
+                                        <span style={{ color: p.status === 'online' ? '#1b7a3d' : '#c62828', fontSize: 11 }}>● {p.status}</span>
+                                      </td>
+                                    </tr>
+                                  ))}
+                                </tbody>
+                              </table>
+                            )}
+                          </td></tr>
+                        )}
+                      </React.Fragment>
                     )
                   })}
                 </tbody>
