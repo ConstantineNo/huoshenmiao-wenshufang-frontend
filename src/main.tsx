@@ -125,6 +125,8 @@ type PreflightResult = {
   issues: ScanIssue[]
 }
 
+type AgentInfo = { id: string; name: string; hostname: string; status: string; last_seen_at: string | null; created_at: string }
+
 const SESSION_STORAGE_KEY = 'cloud-print-web/admin-session'
 
 function normalizeApiBaseUrl(value: string) {
@@ -220,6 +222,8 @@ function App() {
   const [checkingFonts, setCheckingFonts] = useState(false)
   const [uploadingFont, setUploadingFont] = useState(false)
   const [fontUploadMsg, setFontUploadMsg] = useState('')
+  const [agents, setAgents] = useState<AgentInfo[]>([])
+  const [agentsLoading, setAgentsLoading] = useState(false)
 
   useEffect(() => {
     const persisted = readPersistedSession()
@@ -271,11 +275,27 @@ function App() {
     }
 
     void loadTemplates()
+    void loadAgents()
 
     return () => {
       cancelled = true
     }
   }, [session])
+
+  async function loadAgents() {
+    if (!session) return
+    setAgentsLoading(true)
+    try {
+      const resp = await fetch(`${session.apiBaseUrl}/api/v1/admin/agents`, {
+        headers: { Authorization: `Bearer ${session.accessToken}` },
+      })
+      if (resp.ok) {
+        const data = await resp.json()
+        setAgents(data.items as AgentInfo[])
+      }
+    } catch { /* ignore */ }
+    finally { setAgentsLoading(false) }
+  }
 
   async function handleSubmit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault()
@@ -698,6 +718,41 @@ function App() {
               <dd>{session.profile.status}</dd>
             </div>
           </dl>
+        </article>
+
+        <article className="panel-card">
+          <p className="panel-kicker">远程节点</p>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+            <h3 style={{ margin: '6px 0 0' }}>边缘打印代理</h3>
+            <button type="button" className="ghost-button" style={{ fontSize: 12, height: 30 }}
+              onClick={() => { void loadAgents() }} disabled={agentsLoading}>
+              {agentsLoading ? '刷新中...' : '刷新'}
+            </button>
+          </div>
+          {agents.length === 0 ? (
+            <p className="empty-state" style={{ marginTop: 10 }}>暂无已注册的边缘节点。部署 local-print-agent 后会自动出现在这里。</p>
+          ) : (
+            <div style={{ marginTop: 10 }}>
+              <table className="template-table">
+                <thead><tr>
+                  <th>节点名称</th><th>主机名</th><th>状态</th><th>最后心跳</th>
+                </tr></thead>
+                <tbody>
+                  {agents.map(a => {
+                    const online = a.last_seen_at ? (Date.now() - new Date(a.last_seen_at).getTime()) < 120000 : false
+                    return (
+                      <tr key={a.id}>
+                        <td><strong>{a.name}</strong><span className="table-subtext">{a.id}</span></td>
+                        <td>{a.hostname}</td>
+                        <td><span style={{ color: online ? '#1b7a3d' : '#c62828', fontWeight: 600 }}>{online ? '● 在线' : '○ 离线'}</span></td>
+                        <td>{a.last_seen_at ? new Date(a.last_seen_at).toLocaleString('zh-CN') : '从未'}</td>
+                      </tr>
+                    )
+                  })}
+                </tbody>
+              </table>
+            </div>
+          )}
         </article>
 
         <article className="panel-card wide-card">
