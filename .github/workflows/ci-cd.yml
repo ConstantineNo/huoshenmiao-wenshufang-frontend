@@ -72,7 +72,8 @@ jobs:
           port: ${{ secrets.DEPLOY_PORT || 22 }}
           script_stop: true
           script: |
+            set -x
             mkdir -p ${{ secrets.DEPLOY_PATH }}
             cd ${{ secrets.DEPLOY_PATH }}
             chmod +x scripts/deploy_static.sh
-            bash scripts/deploy_static.sh
+            bash -x scripts/deploy_static.sh
