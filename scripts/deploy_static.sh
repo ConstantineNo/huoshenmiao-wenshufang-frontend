@@ -23,6 +23,18 @@ set -a
 source "$ENV_FILE"
 set +a
 
+strip_trailing_cr() {
+  printf '%s' "${1%$'\r'}"
+}
+
+FRONTEND_DEPLOY_DIR="$(strip_trailing_cr "${FRONTEND_DEPLOY_DIR:-}")"
+FRONTEND_DOMAIN="$(strip_trailing_cr "${FRONTEND_DOMAIN:-}")"
+FRONTEND_CLIENT_MAX_BODY_SIZE="$(strip_trailing_cr "${FRONTEND_CLIENT_MAX_BODY_SIZE:-}")"
+CERTBOT_EMAIL="$(strip_trailing_cr "${CERTBOT_EMAIL:-}")"
+NGINX_SITE_NAME="$(strip_trailing_cr "${NGINX_SITE_NAME:-}")"
+NGINX_SITE_AVAILABLE_DIR="$(strip_trailing_cr "${NGINX_SITE_AVAILABLE_DIR:-}")"
+NGINX_SITE_ENABLED_DIR="$(strip_trailing_cr "${NGINX_SITE_ENABLED_DIR:-}")"
+
 if [ -z "${FRONTEND_DEPLOY_DIR:-}" ]; then
   echo "FRONTEND_DEPLOY_DIR is required"
   exit 1
