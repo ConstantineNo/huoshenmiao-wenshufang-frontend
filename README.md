@@ -14,6 +14,7 @@
 - 先建立最小 Vite + React + TypeScript 骨架
 - 后续按 docs 仓中的云边端 CONTRACT 对接 REST API
 - 当前已接入最小管理员登录入口，可调用 backend 的 `/api/v1/auth/admin/login` 并在浏览器持久化登录态
+- 生产环境默认优先走当前站点同源地址，再由 Nginx 通过 `/api/` 反代到 backend，避免浏览器跨域与私网访问限制
 
 部署策略：
 
@@ -44,6 +45,7 @@ npm run dev
 - 页面刷新后会自动恢复最近一次管理员登录态。
 - 登录后的管理台当前已接入模板上传表单和模板列表，可直接验证 Web 到 backend 的第一段业务链路。
 - 当前登录页默认测试管理员示例为 `admin_test / Test123456!`，实际可用值仍以服务器真实 env 中的 bootstrap admin 配置为准。
+- 若浏览器里保存过旧的 `https://api.print.1to.top` 登录态，当前版本会在 `print.1to.top` 下自动迁回同源地址。
 
 服务端部署入口：
 
@@ -58,4 +60,5 @@ npm run dev
 - 当前部署机至少需要：nginx、certbot、rsync，以及目标目录写权限。
 - 当前部署机若把静态目录设在 `/var/www/...`，部署用户需要具备无密码 sudo 能力，因为发布过程会写入该目录并刷新 Nginx。
 - `deploy/runtime/cloud-print-web.env` 必须由人工提前创建，脚本不再自动从示例文件复制默认值，以避免用错误默认配置直接上线。
+- 生产环境建议让 `VITE_API_BASE_URL` 保持为空，并在 Nginx 中配置 `location /api/` 反代到 cloud-print-server；这样前端请求保持同源，不需要额外 API 域名或 CORS 依赖。
 

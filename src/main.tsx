@@ -43,20 +43,31 @@ function normalizeApiBaseUrl(value: string) {
   return value.trim().replace(/\/$/, '')
 }
 
+function preferSameOriginApiBaseUrl(value: string) {
+  const normalizedValue = normalizeApiBaseUrl(value)
+  if (typeof window === 'undefined') {
+    return normalizedValue
+  }
+
+  if (window.location.hostname === 'print.1to.top' && normalizedValue === 'https://api.print.1to.top') {
+    return window.location.origin
+  }
+
+  return normalizedValue
+}
+
 function readDefaultApiBaseUrl() {
   const envValue = import.meta.env.VITE_API_BASE_URL
   if (typeof envValue === 'string' && envValue.trim()) {
-    return normalizeApiBaseUrl(envValue)
+    return preferSameOriginApiBaseUrl(envValue)
   }
 
   if (typeof window !== 'undefined') {
-    const { hostname } = window.location
-    if (hostname === 'print.1to.top') {
-      return 'https://api.print.1to.top'
-    }
+    const { hostname, origin } = window.location
     if (hostname === 'localhost' || hostname === '127.0.0.1') {
       return 'http://127.0.0.1:18080'
     }
+    return origin
   }
 
   return 'http://127.0.0.1:18080'
@@ -73,6 +84,7 @@ function readPersistedSession(): PersistedSession | null {
     if (!parsed.accessToken || !parsed.profile || !parsed.apiBaseUrl) {
       return null
     }
+    parsed.apiBaseUrl = preferSameOriginApiBaseUrl(parsed.apiBaseUrl)
     return parsed
   } catch {
     return null
@@ -164,7 +176,7 @@ function App() {
     setIsSubmitting(true)
     setErrorMessage('')
 
-    const normalizedApiBaseUrl = normalizeApiBaseUrl(apiBaseUrl)
+    const normalizedApiBaseUrl = preferSameOriginApiBaseUrl(apiBaseUrl)
 
     try {
       const response = await fetch(`${normalizedApiBaseUrl}/api/v1/auth/admin/login`, {
@@ -187,7 +199,7 @@ function App() {
         if (detail === 'admin_inactive') {
           throw new Error('当前管理员账号已被停用。')
         }
-        throw new Error('登录失败，请检查后端地址、跨域配置和服务状态。')
+        throw new Error('登录失败，请检查后端地址和服务状态。')
       }
 
       const payload = (await response.json()) as LoginResponse
