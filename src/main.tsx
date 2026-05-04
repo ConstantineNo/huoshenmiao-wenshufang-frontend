@@ -37,6 +37,94 @@ type TemplateSummary = {
   updated_at: string
 }
 
+type ScanResult = {
+  template_id: string
+  template_version_id: string
+  editable_segments: EditableSegment[]
+  text_blocks: TextBlock[]
+  found_placeholders: Placeholder[]
+  found_regions: BookmarkRegion[]
+  issues: ScanIssue[]
+}
+
+type EditableSegment = {
+  segment_key: string
+  text: string
+  highlight_color: string
+  location: { block_key?: string; start_offset?: number; end_offset?: number }
+  style?: Record<string, unknown>
+}
+
+type TextBlock = {
+  block_key: string
+  text: string
+  container_type: string
+  style?: Record<string, unknown>
+}
+
+type Placeholder = {
+  token: string
+  field_key: string
+  scope: string
+  formatter?: { kind: string; pattern: string } | null
+  default_value?: string | null
+}
+
+type BookmarkRegion = {
+  bookmark_name: string
+  region_key: string
+  region_type: string
+}
+
+type ScanIssue = {
+  code: string
+  severity: string
+  message: string
+  target: Record<string, string | null | undefined>
+}
+
+type FieldDefinition = {
+  segment_key?: string
+  field_key: string
+  label: string
+  value_type: string
+  required: boolean
+  binding_kind: string
+}
+
+type TableDraftRow = {
+  row_key: string
+  cells: Record<string, string>
+  print_config: { printer_id: string | null; copies: number; operator_name: string | null }
+}
+
+type PreviewRun = {
+  text: string
+  editable: boolean
+  field_key?: string
+}
+
+type PreviewBlock = {
+  block_key: string
+  container_type: string
+  runs: PreviewRun[]
+}
+
+type TableDraftResponse = {
+  template_version_id: string
+  columns: { field_key: string; label: string; value_type: string; required: boolean; binding_kind: string }[]
+  active_row_key: string | null
+  rows: TableDraftRow[]
+  preview: { blocks: PreviewBlock[] }
+}
+
+type PreflightResult = {
+  template_id: string
+  template_version_id: string
+  passed: boolean
+  issues: ScanIssue[]
+}
+
 const SESSION_STORAGE_KEY = 'cloud-print-web/admin-session'
 
 function normalizeApiBaseUrl(value: string) {
@@ -114,6 +202,16 @@ function App() {
   const [templateFile, setTemplateFile] = useState<File | null>(null)
   const [uploadingTemplate, setUploadingTemplate] = useState(false)
   const [uploadMessage, setUploadMessage] = useState('')
+  const [activeTemplateId, setActiveTemplateId] = useState<string | null>(null)
+  const [scanResult, setScanResult] = useState<ScanResult | null>(null)
+  const [scanning, setScanning] = useState(false)
+  const [scanError, setScanError] = useState('')
+  const [fields, setFields] = useState<FieldDefinition[]>([])
+  const [savingFields, setSavingFields] = useState(false)
+  const [tableDraft, setTableDraft] = useState<TableDraftResponse | null>(null)
+  const [savingDraft, setSavingDraft] = useState(false)
+  const [preflightResult, setPreflightResult] = useState<PreflightResult | null>(null)
+  const [runningPreflight, setRunningPreflight] = useState(false)
 
   useEffect(() => {
     const persisted = readPersistedSession()
@@ -301,6 +399,111 @@ function App() {
     }
   }
 
+  async function handleScanTemplate(templateId: string, versionId: string) {
+    if (!session) return
+    setScanning(true)
+    setScanError('')
+    try {
+      const resp = await fetch(`${session.apiBaseUrl}/api/v1/templates/${templateId}/scan-markers`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${session.accessToken}` },
+      })
+      if (!resp.ok) {
+        const payload = await resp.json().catch(() => null) as { detail?: string } | null
+        throw new Error(payload?.detail || '扫描失败')
+      }
+      const result = (await resp.json()) as ScanResult
+      setScanResult(result)
+      const autoFields: FieldDefinition[] = result.editable_segments.map((seg) => ({
+        segment_key: seg.segment_key,
+        field_key: seg.segment_key,
+        label: seg.text || seg.segment_key,
+        value_type: 'string',
+        required: false,
+        binding_kind: 'text',
+      }))
+      setFields(autoFields)
+    } catch (err) {
+      setScanError(err instanceof Error ? err.message : '扫描失败')
+    } finally {
+      setScanning(false)
+    }
+  }
+
+  async function handleSaveFields(versionId: string) {
+    if (!session) return
+    setSavingFields(true)
+    try {
+      await fetch(`${session.apiBaseUrl}/api/v1/templates/${versionId}/fields`, {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${session.accessToken}`,
+        },
+        body: JSON.stringify({ fields }),
+      })
+    } finally {
+      setSavingFields(false)
+    }
+  }
+
+  async function handleSaveTableDraft(versionId: string, draft: { active_row_key: string | null; rows: TableDraftRow[] }) {
+    if (!session) return
+    setSavingDraft(true)
+    try {
+      const resp = await fetch(`${session.apiBaseUrl}/api/v1/templates/${versionId}/table-draft`, {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${session.accessToken}`,
+        },
+        body: JSON.stringify(draft),
+      })
+      if (resp.ok) {
+        const result = (await resp.json()) as TableDraftResponse
+        setTableDraft(result)
+      }
+    } finally {
+      setSavingDraft(false)
+    }
+  }
+
+  async function handlePreflight(templateId: string) {
+    if (!session) return
+    setRunningPreflight(true)
+    try {
+      const resp = await fetch(`${session.apiBaseUrl}/api/v1/templates/${templateId}/preflight`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${session.accessToken}` },
+      })
+      if (resp.ok) {
+        setPreflightResult((await resp.json()) as PreflightResult)
+      }
+    } finally {
+      setRunningPreflight(false)
+    }
+  }
+
+  function handleSelectTemplate(item: TemplateSummary) {
+    setActiveTemplateId(item.id)
+    setScanResult(null)
+    setScanError('')
+    setFields([])
+    setTableDraft(null)
+    setPreflightResult(null)
+  }
+
+  function handleBackToList() {
+    setActiveTemplateId(null)
+    setScanResult(null)
+    setScanError('')
+    setFields([])
+    setTableDraft(null)
+    setPreflightResult(null)
+  }
+
+  const activeTemplate = templates.find((t) => t.id === activeTemplateId)
+
   const dashboard = session ? (
     <section className="dashboard-shell">
       <header className="topbar-card">
@@ -419,7 +622,12 @@ function App() {
                     </thead>
                     <tbody>
                       {templates.map((item) => (
-                        <tr key={item.id}>
+                        <tr
+                          key={item.id}
+                          className={activeTemplateId === item.id ? 'selected-row' : ''}
+                          onClick={() => handleSelectTemplate(item)}
+                          style={{ cursor: 'pointer' }}
+                        >
                           <td>
                             <strong>{item.name}</strong>
                             <span className="table-subtext">{item.id}</span>
@@ -438,23 +646,259 @@ function App() {
           </div>
         </article>
 
-        <article className="panel-card wide-card">
-          <p className="panel-kicker">下一批接入项</p>
-          <div className="roadmap-grid">
-            <section>
-              <h3>模板扫描</h3>
-              <p>把旧 print-engine 的扫描能力迁到 cloud-print-server，生成可配置字段草稿。</p>
-            </section>
-            <section>
-              <h3>边缘节点</h3>
-              <p>查看在线打印端、拉取打印机目录、确认节点状态。</p>
-            </section>
-            <section>
-              <h3>打印任务</h3>
-              <p>基于已发布模板发起打印，并跟踪任务状态。</p>
-            </section>
-          </div>
-        </article>
+        {activeTemplate ? (
+          <article className="panel-card wide-card">
+            <div className="template-list-header">
+              <div>
+                <p className="panel-kicker">模板工作区</p>
+                <h3>{activeTemplate.name}</h3>
+              </div>
+              <button type="button" className="ghost-button" onClick={handleBackToList}>
+                ← 返回列表
+              </button>
+            </div>
+
+            <div className="template-stage-flow">
+              <section className="stage-section">
+                <h4>1. 扫描标记</h4>
+                {!scanResult ? (
+                  <div>
+                    <p className="upload-hint">扫描模板中的黄色高亮片段、占位符和书签。</p>
+                    <button
+                      type="button"
+                      className="primary-button"
+                      disabled={scanning}
+                      onClick={() => handleScanTemplate(activeTemplate.id, activeTemplate.template_version_id)}
+                    >
+                      {scanning ? '扫描中...' : '开始扫描'}
+                    </button>
+                    {scanError ? <p className="error-banner">{scanError}</p> : null}
+                  </div>
+                ) : (
+                  <div>
+                    <div className="scan-summary-grid">
+                      <div className="scan-stat">
+                        <span className="scan-stat-num">{scanResult.editable_segments.length}</span>
+                        <span className="scan-stat-label">高亮片段</span>
+                      </div>
+                      <div className="scan-stat">
+                        <span className="scan-stat-num">{scanResult.found_placeholders.length}</span>
+                        <span className="scan-stat-label">占位符</span>
+                      </div>
+                      <div className="scan-stat">
+                        <span className="scan-stat-num">{scanResult.found_regions.length}</span>
+                        <span className="scan-stat-label">结构书签</span>
+                      </div>
+                      <div className={`scan-stat ${scanResult.issues.filter((i) => i.severity === 'error').length > 0 ? 'scan-stat-warn' : ''}`}>
+                        <span className="scan-stat-num">{scanResult.issues.length}</span>
+                        <span className="scan-stat-label">问题</span>
+                      </div>
+                    </div>
+                    {scanResult.issues.length > 0 ? (
+                      <details className="issues-detail">
+                        <summary>查看问题详情</summary>
+                        <ul className="issues-list">
+                          {scanResult.issues.map((iss, idx) => (
+                            <li key={idx} className={iss.severity === 'error' ? 'issue-error' : 'issue-warn'}>
+                              [{iss.severity}] {iss.message}
+                            </li>
+                          ))}
+                        </ul>
+                      </details>
+                    ) : null}
+                  </div>
+                )}
+              </section>
+
+              {scanResult && (
+                <>
+                  <section className="stage-section">
+                    <h4>2. 字段定义</h4>
+                    <p className="upload-hint">为每个高亮片段配置字段键、标签和类型。field_key 必须使用小写 snake_case。</p>
+                    {fields.map((fd, idx) => (
+                      <div key={fd.segment_key || idx} className="field-editor-row">
+                        <input
+                          className="compact-input"
+                          value={fd.segment_key || ''}
+                          disabled
+                          title="segment_key"
+                        />
+                        <input
+                          className="compact-input"
+                          value={fd.field_key}
+                          onChange={(e) => {
+                            const next = [...fields]
+                            next[idx] = { ...next[idx], field_key: e.target.value }
+                            setFields(next)
+                          }}
+                          placeholder="field_key"
+                        />
+                        <input
+                          className="compact-input"
+                          value={fd.label}
+                          onChange={(e) => {
+                            const next = [...fields]
+                            next[idx] = { ...next[idx], label: e.target.value }
+                            setFields(next)
+                          }}
+                          placeholder="字段标签"
+                        />
+                        <select
+                          className="compact-select"
+                          value={fd.value_type}
+                          onChange={(e) => {
+                            const next = [...fields]
+                            next[idx] = { ...next[idx], value_type: e.target.value }
+                            setFields(next)
+                          }}
+                        >
+                          <option value="string">string</option>
+                          <option value="integer">integer</option>
+                          <option value="decimal">decimal</option>
+                          <option value="date">date</option>
+                          <option value="boolean">boolean</option>
+                        </select>
+                      </div>
+                    ))}
+                    <button
+                      type="button"
+                      className="primary-button"
+                      disabled={savingFields}
+                      onClick={() => handleSaveFields(activeTemplate.template_version_id)}
+                    >
+                      {savingFields ? '保存中...' : '保存字段定义'}
+                    </button>
+                    <button
+                      type="button"
+                      className="ghost-button"
+                      disabled={runningPreflight}
+                      onClick={() => handlePreflight(activeTemplate.id)}
+                      style={{ marginLeft: 8 }}
+                    >
+                      {runningPreflight ? '预检中...' : '发布预检'}
+                    </button>
+                    {preflightResult ? (
+                      <p className={preflightResult.passed ? 'info-banner' : 'error-banner'}>
+                        {preflightResult.passed ? '✓ 预检通过，可以发布' : `✗ 预检未通过：${preflightResult.issues.length} 个问题`}
+                      </p>
+                    ) : null}
+                  </section>
+
+                  <section className="stage-section">
+                    <h4>3. 待打数据</h4>
+                    <p className="upload-hint">填写待打印数据。Tab/Enter 切换单元格，最后一行留空自动新增。</p>
+                    {fields.length > 0 ? (
+                      <div className="table-draft-wrap">
+                        <table className="template-table draft-table">
+                          <thead>
+                            <tr>
+                              {fields.map((fd) => (
+                                <th key={fd.field_key}>{fd.label || fd.field_key}</th>
+                              ))}
+                              <th>份数</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {(tableDraft?.rows || [{ row_key: 'draft_001', cells: {}, print_config: { printer_id: null, copies: 1, operator_name: null } }]).map((row, rowIdx) => (
+                              <tr key={row.row_key}>
+                                {fields.map((fd) => (
+                                  <td key={fd.field_key}>
+                                    <input
+                                      className="cell-input"
+                                      value={row.cells[fd.field_key] || ''}
+                                      onChange={(e) => {
+                                        const rows = [...(tableDraft?.rows || [{ row_key: 'draft_001', cells: {}, print_config: { printer_id: null, copies: 1, operator_name: null } }])]
+                                        rows[rowIdx] = {
+                                          ...rows[rowIdx],
+                                          cells: { ...rows[rowIdx].cells, [fd.field_key]: e.target.value },
+                                        }
+                                        const activeRowKey = rows[rows.length - 1]?.row_key || null
+                                        const draft = { active_row_key: activeRowKey, rows }
+                                        setTableDraft({ ...tableDraft, active_row_key: activeRowKey, rows } as TableDraftResponse)
+                                      }}
+                                    />
+                                  </td>
+                                ))}
+                                <td>
+                                  <input
+                                    className="cell-input cell-narrow"
+                                    type="number"
+                                    min={1}
+                                    value={row.print_config?.copies || 1}
+                                    onChange={(e) => {
+                                      const rows = [...(tableDraft?.rows || [{ row_key: 'draft_001', cells: {}, print_config: { printer_id: null, copies: 1, operator_name: null } }])]
+                                      rows[rowIdx] = {
+                                        ...rows[rowIdx],
+                                        print_config: { ...rows[rowIdx].print_config, copies: parseInt(e.target.value) || 1 },
+                                      }
+                                      const activeRowKey = rows[rows.length - 1]?.row_key || null
+                                      const draft = { active_row_key: activeRowKey, rows }
+                                      setTableDraft({ ...tableDraft, active_row_key: activeRowKey, rows } as TableDraftResponse)
+                                    }}
+                                  />
+                                </td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                        <div style={{ marginTop: 8, display: 'flex', gap: 8 }}>
+                          <button
+                            type="button"
+                            className="ghost-button"
+                            onClick={() => {
+                              const rows = tableDraft?.rows || []
+                              const newRow: TableDraftRow = {
+                                row_key: `draft_${String(rows.length + 1).padStart(3, '0')}`,
+                                cells: {},
+                                print_config: { printer_id: null, copies: 1, operator_name: null },
+                              }
+                              const draft = { active_row_key: newRow.row_key, rows: [...rows, newRow] }
+                              setTableDraft({ ...tableDraft, active_row_key: newRow.row_key, rows: [...rows, newRow] } as TableDraftResponse)
+                            }}
+                          >
+                            + 添加行
+                          </button>
+                          <button
+                            type="button"
+                            className="primary-button"
+                            disabled={savingDraft}
+                            onClick={() => {
+                              const rows = tableDraft?.rows || []
+                              if (rows.length === 0) return
+                              const draft = { active_row_key: tableDraft?.active_row_key || rows[0].row_key, rows }
+                              handleSaveTableDraft(activeTemplate.template_version_id, draft)
+                            }}
+                          >
+                            {savingDraft ? '保存中...' : '保存并预览'}
+                          </button>
+                        </div>
+                      </div>
+                    ) : (
+                      <p className="empty-state">请先扫描模板并保存字段定义。</p>
+                    )}
+                  </section>
+
+                  {tableDraft?.preview?.blocks && tableDraft.preview.blocks.length > 0 ? (
+                    <section className="stage-section">
+                      <h4>4. 预览</h4>
+                      <div className="preview-panel">
+                        {tableDraft.preview.blocks.map((blk) => (
+                          <p key={blk.block_key} className="preview-block">
+                            {blk.runs.map((run, ri) => (
+                              <span key={ri} className={run.editable ? 'preview-editable' : ''} title={run.field_key}>
+                                {run.text}
+                              </span>
+                            ))}
+                          </p>
+                        ))}
+                      </div>
+                    </section>
+                  ) : null}
+                </>
+              )}
+            </div>
+          </article>
+        ) : null}
       </section>
     </section>
   ) : (

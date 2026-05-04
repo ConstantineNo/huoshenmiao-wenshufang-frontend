@@ -388,3 +388,154 @@ p {
     flex-direction: column;
   }
 }
+
+.template-stage-flow {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+
+.stage-section {
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  padding: 16px;
+}
+
+.stage-section h4 {
+  margin: 0 0 8px;
+  font-size: 1rem;
+  color: var(--text-primary);
+}
+
+.scan-summary-grid {
+  display: flex;
+  gap: 16px;
+  flex-wrap: wrap;
+  margin: 12px 0;
+}
+
+.scan-stat {
+  background: var(--accent-bg);
+  border-radius: 8px;
+  padding: 12px 20px;
+  text-align: center;
+  min-width: 80px;
+}
+
+.scan-stat-num {
+  display: block;
+  font-size: 1.5rem;
+  font-weight: 700;
+  color: var(--text-primary);
+}
+
+.scan-stat-label {
+  font-size: 0.8rem;
+  color: var(--text-muted);
+}
+
+.scan-stat-warn {
+  background: #fef2f2;
+}
+
+.scan-stat-warn .scan-stat-num {
+  color: #dc2626;
+}
+
+.issues-detail {
+  margin-top: 8px;
+  font-size: 0.85rem;
+}
+
+.issues-list {
+  margin: 4px 0 0 16px;
+  padding: 0;
+}
+
+.issue-error {
+  color: #dc2626;
+}
+
+.issue-warn {
+  color: #d97706;
+}
+
+.field-editor-row {
+  display: flex;
+  gap: 6px;
+  margin-bottom: 6px;
+  align-items: center;
+}
+
+.compact-input {
+  flex: 1;
+  min-width: 0;
+  padding: 4px 6px;
+  font-size: 0.85rem;
+  border: 1px solid var(--border-color);
+  border-radius: 4px;
+  background: var(--bg-primary);
+  color: var(--text-primary);
+}
+
+.compact-select {
+  padding: 4px 6px;
+  font-size: 0.85rem;
+  border: 1px solid var(--border-color);
+  border-radius: 4px;
+  background: var(--bg-primary);
+  color: var(--text-primary);
+}
+
+.table-draft-wrap {
+  overflow-x: auto;
+}
+
+.draft-table {
+  width: 100%;
+}
+
+.cell-input {
+  width: 100%;
+  padding: 4px 6px;
+  border: 1px solid transparent;
+  border-radius: 3px;
+  background: transparent;
+  color: var(--text-primary);
+  font-size: 0.85rem;
+  box-sizing: border-box;
+}
+
+.cell-input:focus {
+  border-color: var(--accent-border);
+  background: var(--bg-primary);
+  outline: none;
+}
+
+.cell-narrow {
+  width: 60px;
+}
+
+.preview-panel {
+  background: #fff;
+  border: 1px solid var(--border-color);
+  border-radius: 6px;
+  padding: 20px;
+  font-family: 'SimSun', '宋体', serif;
+  line-height: 1.8;
+}
+
+.preview-block {
+  margin: 0 0 4px;
+  white-space: pre-wrap;
+}
+
+.preview-editable {
+  background: #fef9c3;
+  border-radius: 2px;
+  padding: 0 2px;
+}
+
+.selected-row {
+  background: var(--accent-bg) !important;
+}
