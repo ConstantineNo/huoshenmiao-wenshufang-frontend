@@ -212,6 +212,7 @@ function App() {
   const [savingDraft, setSavingDraft] = useState(false)
   const [preflightResult, setPreflightResult] = useState<PreflightResult | null>(null)
   const [runningPreflight, setRunningPreflight] = useState(false)
+  const [activeStep, setActiveStep] = useState(1)
 
   useEffect(() => {
     const persisted = readPersistedSession()
@@ -491,6 +492,7 @@ function App() {
     setFields([])
     setTableDraft(null)
     setPreflightResult(null)
+    setActiveStep(1)
   }
 
   function handleBackToList() {
@@ -500,6 +502,7 @@ function App() {
     setFields([])
     setTableDraft(null)
     setPreflightResult(null)
+    setActiveStep(1)
   }
 
   const activeTemplate = templates.find((t) => t.id === activeTemplateId)
@@ -648,35 +651,37 @@ function App() {
 
         {activeTemplate ? (
           <article className="panel-card wide-card">
-            <div className="template-list-header">
+            <div className="template-workspace-header">
               <div>
                 <p className="panel-kicker">模板工作区</p>
-                <h3>{activeTemplate.name}</h3>
+                <h2>{activeTemplate.name}</h2>
               </div>
-              <button type="button" className="ghost-button" onClick={handleBackToList}>
-                ← 返回列表
-              </button>
+              <button type="button" className="ghost-button" onClick={handleBackToList}>← 返回列表</button>
             </div>
 
-            <div className="template-stage-flow">
-              <section className="stage-section">
-                <h4>1. 扫描标记</h4>
+            <nav className="step-nav">
+              <button className={activeStep === 1 ? 'active' : ''} onClick={() => setActiveStep(1)}>1. 扫描标记</button>
+              <button className={activeStep === 2 ? 'active' : ''} onClick={() => setActiveStep(2)} disabled={!scanResult}>2. 字段定义</button>
+              <button className={activeStep === 3 ? 'active' : ''} onClick={() => setActiveStep(3)} disabled={!scanResult}>3. 待打数据</button>
+              <button className={activeStep === 4 ? 'active' : ''} onClick={() => setActiveStep(4)} disabled={!scanResult}>4. 打印预览</button>
+            </nav>
+
+            {activeStep === 1 && (
+              <div className="stage-panel">
+                <h3 style={{ margin: '0 0 4px' }}>扫描标记</h3>
+                <p className="upload-hint">识别模板中的黄色高亮片段、占位符 [[field_key]] 和结构书签。</p>
+
                 {!scanResult ? (
-                  <div>
-                    <p className="upload-hint">扫描模板中的黄色高亮片段、占位符和书签。</p>
-                    <button
-                      type="button"
-                      className="primary-button"
-                      disabled={scanning}
-                      onClick={() => handleScanTemplate(activeTemplate.id, activeTemplate.template_version_id)}
-                    >
+                  <div style={{ marginTop: 16 }}>
+                    <button type="button" className="primary-button" disabled={scanning}
+                      onClick={() => handleScanTemplate(activeTemplate.id, activeTemplate.template_version_id)}>
                       {scanning ? '扫描中...' : '开始扫描'}
                     </button>
-                    {scanError ? <p className="error-banner">{scanError}</p> : null}
+                    {scanError ? <p className="error-banner" style={{ marginTop: 10 }}>{scanError}</p> : null}
                   </div>
                 ) : (
-                  <div>
-                    <div className="scan-summary-grid">
+                  <div style={{ marginTop: 16 }}>
+                    <div className="scan-stats">
                       <div className="scan-stat">
                         <span className="scan-stat-num">{scanResult.editable_segments.length}</span>
                         <span className="scan-stat-label">高亮片段</span>
@@ -689,214 +694,158 @@ function App() {
                         <span className="scan-stat-num">{scanResult.found_regions.length}</span>
                         <span className="scan-stat-label">结构书签</span>
                       </div>
-                      <div className={`scan-stat ${scanResult.issues.filter((i) => i.severity === 'error').length > 0 ? 'scan-stat-warn' : ''}`}>
+                      <div className={`scan-stat ${scanResult.issues.filter(i => i.severity === 'error').length > 0 ? 'warn' : ''}`}>
                         <span className="scan-stat-num">{scanResult.issues.length}</span>
                         <span className="scan-stat-label">问题</span>
                       </div>
                     </div>
-                    {scanResult.issues.length > 0 ? (
-                      <details className="issues-detail">
-                        <summary>查看问题详情</summary>
+                    {scanResult.issues.length > 0 && (
+                      <details style={{ marginTop: 10 }}>
+                        <summary style={{ cursor: 'pointer', fontSize: 13, color: 'var(--color-text-secondary)' }}>查看问题详情</summary>
                         <ul className="issues-list">
                           {scanResult.issues.map((iss, idx) => (
-                            <li key={idx} className={iss.severity === 'error' ? 'issue-error' : 'issue-warn'}>
-                              [{iss.severity}] {iss.message}
-                            </li>
+                            <li key={idx} className={iss.severity === 'error' ? 'err' : 'warn'}>[{iss.severity}] {iss.message}</li>
                           ))}
                         </ul>
                       </details>
-                    ) : null}
+                    )}
+                    <div style={{ marginTop: 16 }}>
+                      <button type="button" className="primary-button" onClick={() => setActiveStep(2)}>下一步：字段定义 →</button>
+                    </div>
                   </div>
                 )}
-              </section>
+              </div>
+            )}
 
-              {scanResult && (
-                <>
-                  <section className="stage-section">
-                    <h4>2. 字段定义</h4>
-                    <p className="upload-hint">为每个高亮片段配置字段键、标签和类型。field_key 必须使用小写 snake_case。</p>
-                    {fields.map((fd, idx) => (
-                      <div key={fd.segment_key || idx} className="field-editor-row">
-                        <input
-                          className="compact-input"
-                          value={fd.segment_key || ''}
-                          disabled
-                          title="segment_key"
-                        />
-                        <input
-                          className="compact-input"
-                          value={fd.field_key}
-                          onChange={(e) => {
-                            const next = [...fields]
-                            next[idx] = { ...next[idx], field_key: e.target.value }
-                            setFields(next)
-                          }}
-                          placeholder="field_key"
-                        />
-                        <input
-                          className="compact-input"
-                          value={fd.label}
-                          onChange={(e) => {
-                            const next = [...fields]
-                            next[idx] = { ...next[idx], label: e.target.value }
-                            setFields(next)
-                          }}
-                          placeholder="字段标签"
-                        />
-                        <select
-                          className="compact-select"
-                          value={fd.value_type}
-                          onChange={(e) => {
-                            const next = [...fields]
-                            next[idx] = { ...next[idx], value_type: e.target.value }
-                            setFields(next)
-                          }}
-                        >
-                          <option value="string">string</option>
-                          <option value="integer">integer</option>
-                          <option value="decimal">decimal</option>
-                          <option value="date">date</option>
-                          <option value="boolean">boolean</option>
-                        </select>
-                      </div>
-                    ))}
-                    <button
-                      type="button"
-                      className="primary-button"
-                      disabled={savingFields}
-                      onClick={() => handleSaveFields(activeTemplate.template_version_id)}
-                    >
-                      {savingFields ? '保存中...' : '保存字段定义'}
-                    </button>
-                    <button
-                      type="button"
-                      className="ghost-button"
-                      disabled={runningPreflight}
-                      onClick={() => handlePreflight(activeTemplate.id)}
-                      style={{ marginLeft: 8 }}
-                    >
-                      {runningPreflight ? '预检中...' : '发布预检'}
-                    </button>
-                    {preflightResult ? (
-                      <p className={preflightResult.passed ? 'info-banner' : 'error-banner'}>
-                        {preflightResult.passed ? '✓ 预检通过，可以发布' : `✗ 预检未通过：${preflightResult.issues.length} 个问题`}
-                      </p>
-                    ) : null}
-                  </section>
+            {activeStep === 2 && scanResult && (
+              <div className="stage-panel">
+                <h3 style={{ margin: '0 0 4px' }}>字段定义</h3>
+                <p className="upload-hint">每个黄色高亮片段对应一个字段。请设置 field_key（小写 snake_case）和中文标签。</p>
+                <div className="field-editor-header">
+                  <span>片段</span><span>field_key</span><span>标签</span><span>类型</span>
+                </div>
+                {fields.map((fd, idx) => (
+                  <div key={fd.segment_key || idx} className="field-row">
+                    <span className="seg-key">{fd.segment_key}</span>
+                    <input value={fd.field_key}
+                      onChange={e => { const n = [...fields]; n[idx] = {...n[idx], field_key: e.target.value}; setFields(n) }}
+                      placeholder="field_key" />
+                    <input value={fd.label}
+                      onChange={e => { const n = [...fields]; n[idx] = {...n[idx], label: e.target.value}; setFields(n) }}
+                      placeholder="字段标签" />
+                    <select value={fd.value_type}
+                      onChange={e => { const n = [...fields]; n[idx] = {...n[idx], value_type: e.target.value}; setFields(n) }}>
+                      <option value="string">string</option>
+                      <option value="integer">integer</option>
+                      <option value="decimal">decimal</option>
+                      <option value="date">date</option>
+                      <option value="boolean">boolean</option>
+                    </select>
+                  </div>
+                ))}
+                <div style={{ marginTop: 14, display: 'flex', gap: 8 }}>
+                  <button type="button" className="primary-button" disabled={savingFields}
+                    onClick={() => { handleSaveFields(activeTemplate.template_version_id); setActiveStep(3) }}>
+                    {savingFields ? '保存中...' : '保存并继续'}
+                  </button>
+                  <button type="button" className="ghost-button" disabled={runningPreflight}
+                    onClick={() => handlePreflight(activeTemplate.id)}>
+                    {runningPreflight ? '预检中...' : '发布预检'}
+                  </button>
+                </div>
+                {preflightResult && (
+                  <div className={`preflight-result ${preflightResult.passed ? 'pass' : 'fail'}`}>
+                    {preflightResult.passed ? '✓ 预检通过' : `✗ ${preflightResult.issues.length} 个问题待解决`}
+                  </div>
+                )}
+              </div>
+            )}
 
-                  <section className="stage-section">
-                    <h4>3. 待打数据</h4>
-                    <p className="upload-hint">填写待打印数据。Tab/Enter 切换单元格，最后一行留空自动新增。</p>
-                    {fields.length > 0 ? (
-                      <div className="table-draft-wrap">
-                        <table className="template-table draft-table">
-                          <thead>
-                            <tr>
-                              {fields.map((fd) => (
-                                <th key={fd.field_key}>{fd.label || fd.field_key}</th>
-                              ))}
-                              <th>份数</th>
-                            </tr>
-                          </thead>
-                          <tbody>
-                            {(tableDraft?.rows || [{ row_key: 'draft_001', cells: {}, print_config: { printer_id: null, copies: 1, operator_name: null } }]).map((row, rowIdx) => (
-                              <tr key={row.row_key}>
-                                {fields.map((fd) => (
-                                  <td key={fd.field_key}>
-                                    <input
-                                      className="cell-input"
-                                      value={row.cells[fd.field_key] || ''}
-                                      onChange={(e) => {
-                                        const rows = [...(tableDraft?.rows || [{ row_key: 'draft_001', cells: {}, print_config: { printer_id: null, copies: 1, operator_name: null } }])]
-                                        rows[rowIdx] = {
-                                          ...rows[rowIdx],
-                                          cells: { ...rows[rowIdx].cells, [fd.field_key]: e.target.value },
-                                        }
-                                        const activeRowKey = rows[rows.length - 1]?.row_key || null
-                                        const draft = { active_row_key: activeRowKey, rows }
-                                        setTableDraft({ ...tableDraft, active_row_key: activeRowKey, rows } as TableDraftResponse)
-                                      }}
-                                    />
-                                  </td>
-                                ))}
-                                <td>
-                                  <input
-                                    className="cell-input cell-narrow"
-                                    type="number"
-                                    min={1}
-                                    value={row.print_config?.copies || 1}
-                                    onChange={(e) => {
-                                      const rows = [...(tableDraft?.rows || [{ row_key: 'draft_001', cells: {}, print_config: { printer_id: null, copies: 1, operator_name: null } }])]
-                                      rows[rowIdx] = {
-                                        ...rows[rowIdx],
-                                        print_config: { ...rows[rowIdx].print_config, copies: parseInt(e.target.value) || 1 },
-                                      }
-                                      const activeRowKey = rows[rows.length - 1]?.row_key || null
-                                      const draft = { active_row_key: activeRowKey, rows }
-                                      setTableDraft({ ...tableDraft, active_row_key: activeRowKey, rows } as TableDraftResponse)
-                                    }}
-                                  />
+            {activeStep === 3 && scanResult && (
+              <div className="stage-panel">
+                <h3 style={{ margin: '0 0 4px' }}>待打数据</h3>
+                <p className="upload-hint">填写需要批量打印的数据行。点击「保存并预览」查看实际排版效果。</p>
+                {fields.length > 0 ? (
+                  <>
+                    <div className="draft-table-wrap">
+                      <table className="draft-table">
+                        <thead><tr>
+                          {fields.map(fd => <th key={fd.field_key}>{fd.label || fd.field_key}</th>)}
+                          <th style={{ width: 68, textAlign: 'center' }}>份数</th>
+                        </tr></thead>
+                        <tbody>
+                          {(tableDraft?.rows?.length ? tableDraft.rows : [{ row_key: 'draft_001', cells: {}, print_config: { printer_id: null, copies: 1, operator_name: null } }] as TableDraftRow[]).map((row, ri) => (
+                            <tr key={row.row_key}>
+                              {fields.map(fd => (
+                                <td key={fd.field_key}>
+                                  <input className="cell-input" value={row.cells[fd.field_key] || ''}
+                                    onChange={e => {
+                                      const rows = [...(tableDraft?.rows?.length ? tableDraft.rows : [{ row_key: 'draft_001', cells: {}, print_config: { printer_id: null, copies: 1, operator_name: null } }])] as TableDraftRow[]
+                                      rows[ri] = { ...rows[ri], cells: { ...rows[ri].cells, [fd.field_key]: e.target.value } }
+                                      setTableDraft(prev => ({ ...prev!, active_row_key: rows[rows.length-1]?.row_key || null, rows } as TableDraftResponse))
+                                    }} />
                                 </td>
-                              </tr>
-                            ))}
-                          </tbody>
-                        </table>
-                        <div style={{ marginTop: 8, display: 'flex', gap: 8 }}>
-                          <button
-                            type="button"
-                            className="ghost-button"
-                            onClick={() => {
-                              const rows = tableDraft?.rows || []
-                              const newRow: TableDraftRow = {
-                                row_key: `draft_${String(rows.length + 1).padStart(3, '0')}`,
-                                cells: {},
-                                print_config: { printer_id: null, copies: 1, operator_name: null },
-                              }
-                              const draft = { active_row_key: newRow.row_key, rows: [...rows, newRow] }
-                              setTableDraft({ ...tableDraft, active_row_key: newRow.row_key, rows: [...rows, newRow] } as TableDraftResponse)
-                            }}
-                          >
-                            + 添加行
-                          </button>
-                          <button
-                            type="button"
-                            className="primary-button"
-                            disabled={savingDraft}
-                            onClick={() => {
-                              const rows = tableDraft?.rows || []
-                              if (rows.length === 0) return
-                              const draft = { active_row_key: tableDraft?.active_row_key || rows[0].row_key, rows }
-                              handleSaveTableDraft(activeTemplate.template_version_id, draft)
-                            }}
-                          >
-                            {savingDraft ? '保存中...' : '保存并预览'}
-                          </button>
-                        </div>
-                      </div>
-                    ) : (
-                      <p className="empty-state">请先扫描模板并保存字段定义。</p>
-                    )}
-                  </section>
+                              ))}
+                              <td>
+                                <input className="cell-input cell-narrow" type="number" min={1}
+                                  value={row.print_config?.copies || 1}
+                                  onChange={e => {
+                                    const rows = [...(tableDraft?.rows?.length ? tableDraft.rows : [{ row_key: 'draft_001', cells: {}, print_config: { printer_id: null, copies: 1, operator_name: null } }])] as TableDraftRow[]
+                                    rows[ri] = { ...rows[ri], print_config: { ...rows[ri].print_config, copies: parseInt(e.target.value) || 1 } }
+                                    setTableDraft(prev => ({ ...prev!, active_row_key: rows[rows.length-1]?.row_key || null, rows } as TableDraftResponse))
+                                  }} />
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                    <div className="draft-actions">
+                      <button type="button" className="ghost-button"
+                        onClick={() => {
+                          const rows = [...(tableDraft?.rows || [])] as TableDraftRow[]
+                          const n = String(rows.length + 1).padStart(3, '0')
+                          rows.push({ row_key: `draft_${n}`, cells: {}, print_config: { printer_id: null, copies: 1, operator_name: null } })
+                          setTableDraft(prev => ({ ...prev!, active_row_key: `draft_${n}`, rows } as TableDraftResponse))
+                        }}>+ 添加行</button>
+                      <button type="button" className="primary-button" disabled={savingDraft}
+                        onClick={() => {
+                          const rows = tableDraft?.rows || []
+                          if (!rows.length) return
+                          handleSaveTableDraft(activeTemplate.template_version_id, { active_row_key: tableDraft?.active_row_key || rows[0].row_key, rows })
+                          setActiveStep(4)
+                        }}>{savingDraft ? '保存中...' : '保存并预览'}</button>
+                    </div>
+                  </>
+                ) : <p className="empty-state">请先扫描模板并保存字段定义。</p>}
+              </div>
+            )}
 
-                  {tableDraft?.preview?.blocks && tableDraft.preview.blocks.length > 0 ? (
-                    <section className="stage-section">
-                      <h4>4. 预览</h4>
-                      <div className="preview-panel">
-                        {tableDraft.preview.blocks.map((blk) => (
-                          <p key={blk.block_key} className="preview-block">
-                            {blk.runs.map((run, ri) => (
-                              <span key={ri} className={run.editable ? 'preview-editable' : ''} title={run.field_key}>
-                                {run.text}
-                              </span>
-                            ))}
-                          </p>
-                        ))}
-                      </div>
-                    </section>
-                  ) : null}
-                </>
-              )}
-            </div>
+            {activeStep === 4 && scanResult && (
+              <div className="stage-panel">
+                <h3 style={{ margin: '0 0 12px' }}>打印预览</h3>
+                <div className="preview-pdf-container">
+                  <iframe
+                    src={`${session.apiBaseUrl}/api/v1/templates/${activeTemplate.id}/preview.pdf`}
+                    title="PDF 预览"
+                  />
+                </div>
+                {tableDraft?.preview?.blocks && tableDraft.preview.blocks.length > 0 && (
+                  <details style={{ marginTop: 14 }}>
+                    <summary style={{ cursor: 'pointer', fontSize: 13, color: 'var(--color-text-secondary)' }}>文字对照</summary>
+                    <div className="preview-fallback" style={{ marginTop: 8 }}>
+                      {tableDraft.preview.blocks.map(blk => (
+                        <p key={blk.block_key} style={{ margin: '0 0 4px', whiteSpace: 'pre-wrap' }}>
+                          {blk.runs.map((run, ri) => (
+                            <span key={ri} className={run.editable ? 'preview-editable' : ''} title={run.field_key}>{run.text}</span>
+                          ))}
+                        </p>
+                      ))}
+                    </div>
+                  </details>
+                )}
+              </div>
+            )}
           </article>
         ) : null}
       </section>
