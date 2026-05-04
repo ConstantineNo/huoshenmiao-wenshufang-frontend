@@ -216,7 +216,7 @@ function App() {
   const [pdfBlobUrl, setPdfBlobUrl] = useState<string | null>(null)
   const [pdfLoading, setPdfLoading] = useState(false)
   const [pdfError, setPdfError] = useState('')
-  const [fontStatus, setFontStatus] = useState<{ compatible: boolean; missing: { name: string; substitute: string }[]; template_fonts: string[] } | null>(null)
+  const [fontStatus, setFontStatus] = useState<{ compatible: boolean; available: { name: string; resolved_to: string }[]; missing: { name: string; substitute: string }[]; template_fonts: string[] } | null>(null)
   const [checkingFonts, setCheckingFonts] = useState(false)
   const [uploadingFont, setUploadingFont] = useState(false)
   const [fontUploadMsg, setFontUploadMsg] = useState('')
@@ -840,45 +840,58 @@ function App() {
                         </ul>
                       </details>
                     )}
-                    {fontStatus && !fontStatus.compatible && (
-                      <div className="font-warning" style={{ marginTop: 14, padding: 16, borderRadius: 10, background: '#fef8e7', border: '1px solid #f0c36d' }}>
-                        <p style={{ margin: '0 0 10px', fontWeight: 700, color: '#b85c0e' }}>⚠ 字体兼容性警告</p>
-                        <p style={{ margin: '0 0 10px', fontSize: 13, color: '#5b5b5b' }}>
-                          以下字体在服务器上不存在，PDF 预览将使用替代字体：
-                        </p>
-                        <table style={{ width: '100%', borderCollapse: 'collapse', marginBottom: 12, fontSize: 13 }}>
-                          <thead>
-                            <tr style={{ borderBottom: '1px solid #f0c36d' }}>
-                              <th style={{ textAlign: 'left', padding: '4px 8px', color: '#8a611c' }}>模板字体</th>
-                              <th style={{ textAlign: 'left', padding: '4px 8px', color: '#8a611c' }}>→ 替代字体</th>
-                            </tr>
-                          </thead>
-                          <tbody>
-                            {fontStatus.missing.map(f => (
-                              <tr key={f.name} style={{ borderBottom: '1px solid #f5e6c8' }}>
-                                <td style={{ padding: '6px 8px', fontWeight: 500 }}>{f.name}</td>
-                                <td style={{ padding: '6px 8px', color: '#5b5b5b' }}>{f.substitute}</td>
-                              </tr>
-                            ))}
-                          </tbody>
-                        </table>
-                        <div style={{ display: 'flex', gap: 8 }}>
-                          <button type="button" className="primary-button" style={{ fontSize: 13 }}
-                            onClick={() => setFontStatus({ ...fontStatus, compatible: true })}>
-                            使用替代字体，继续预览
+                    {fontStatus && (
+                      <div style={{ marginTop: 14, padding: 16, borderRadius: 10, border: '1px solid #e2e0db', background: '#fafaf9' }}>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
+                          <p style={{ margin: 0, fontWeight: 700, fontSize: 14 }}>
+                            {fontStatus.compatible ? '✓ 字体检查通过' : '⚠ 字体兼容性'}
+                          </p>
+                          <button type="button" className="ghost-button" style={{ fontSize: 12, height: 32 }}
+                            onClick={() => activeTemplateId && handleFontCheck(activeTemplateId)}>
+                            {checkingFonts ? '检查中...' : '重新检查'}
                           </button>
-                          <label className="ghost-button" style={{ fontSize: 13, cursor: 'pointer', display: 'inline-flex' }}>
-                            {uploadingFont ? '上传中...' : '上传缺失字体 (.ttf/.otf)'}
-                            <input type="file" accept=".ttf,.otf,.ttc" style={{ display: 'none' }}
-                              onChange={e => { const f = e.target.files?.[0]; if (f) handleFontUpload(f) }}
-                              disabled={uploadingFont} />
-                          </label>
                         </div>
-                        {fontUploadMsg ? (
+                        {fontStatus.available.length > 0 && (
+                          <table style={{ width: '100%', borderCollapse: 'collapse', marginBottom: 8, fontSize: 12 }}>
+                            <tbody>
+                              {fontStatus.available.map(f => (
+                                <tr key={f.name}>
+                                  <td style={{ padding: '3px 8px', color: '#1b7a3d' }}>✓</td>
+                                  <td style={{ padding: '3px 0', fontWeight: 500 }}>{f.name}</td>
+                                  <td style={{ padding: '3px 8px', color: '#8894aa' }}>→ {f.resolved_to}</td>
+                                </tr>
+                              ))}
+                            </tbody>
+                          </table>
+                        )}
+                        {fontStatus.missing.length > 0 && (
+                          <>
+                            <table style={{ width: '100%', borderCollapse: 'collapse', marginBottom: 10, fontSize: 12 }}>
+                              <tbody>
+                                {fontStatus.missing.map(f => (
+                                  <tr key={f.name} style={{ borderBottom: '1px solid #efede8' }}>
+                                    <td style={{ padding: '3px 8px', color: '#c62828' }}>✗</td>
+                                    <td style={{ padding: '3px 0', fontWeight: 500 }}>{f.name}</td>
+                                    <td style={{ padding: '3px 8px', color: '#8894aa' }}>→ {f.substitute}</td>
+                                  </tr>
+                                ))}
+                              </tbody>
+                            </table>
+                            <div style={{ display: 'flex', gap: 8 }}>
+                              <label className="ghost-button" style={{ fontSize: 12, height: 34, cursor: 'pointer', display: 'inline-flex' }}>
+                                {uploadingFont ? '上传中...' : '上传字体 (.ttf/.otf)'}
+                                <input type="file" accept=".ttf,.otf,.ttc" style={{ display: 'none' }}
+                                  onChange={e => { const f = e.target.files?.[0]; if (f) handleFontUpload(f) }}
+                                  disabled={uploadingFont} />
+                              </label>
+                            </div>
+                          </>
+                        )}
+                        {fontUploadMsg && (
                           <p className={fontUploadMsg.includes('成功') ? 'success-banner' : 'error-banner'} style={{ marginTop: 8 }}>
                             {fontUploadMsg}
                           </p>
-                        ) : null}
+                        )}
                       </div>
                     )}
                     <div style={{ marginTop: 16 }}>
