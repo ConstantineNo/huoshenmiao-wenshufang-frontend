@@ -14,8 +14,9 @@ if [ ! -d "$DIST_DIR" ]; then
 fi
 
 if [ ! -f "$ENV_FILE" ]; then
-  cp "$ENV_EXAMPLE" "$ENV_FILE"
-  echo "created $ENV_FILE from example; review values before publishing"
+  echo "$ENV_FILE is required"
+  echo "create it from $ENV_EXAMPLE before running deploy"
+  exit 1
 fi
 
 set -a
@@ -45,9 +46,9 @@ NGINX_SITE_PATH="$NGINX_SITE_AVAILABLE_DIR/$NGINX_SITE_NAME"
 NGINX_LINK_PATH="$NGINX_SITE_ENABLED_DIR/$NGINX_SITE_NAME"
 LE_LIVE_DIR="/etc/letsencrypt/live/$FRONTEND_DOMAIN"
 
-mkdir -p "$FRONTEND_DEPLOY_DIR"
-rsync -av --delete "$DIST_DIR/" "$FRONTEND_DEPLOY_DIR/"
-mkdir -p "$FRONTEND_DEPLOY_DIR/.well-known/acme-challenge"
+sudo mkdir -p "$FRONTEND_DEPLOY_DIR"
+sudo rsync -av --delete "$DIST_DIR/" "$FRONTEND_DEPLOY_DIR/"
+sudo mkdir -p "$FRONTEND_DEPLOY_DIR/.well-known/acme-challenge"
 
 render_https_conf() {
   sed \

@@ -47,4 +47,6 @@ npm run dev
 - deploy job 不再要求服务器上的 DEPLOY_PATH 预先是一个 git 仓库。
 - GitHub Actions 会先把 dist 产物与部署脚本上传到 DEPLOY_PATH，再由服务器执行静态发布、Nginx 配置刷新和 certbot 申请证书。
 - 当前部署机至少需要：nginx、certbot、rsync，以及目标目录写权限。
+- 当前部署机若把静态目录设在 `/var/www/...`，部署用户需要具备无密码 sudo 能力，因为发布过程会写入该目录并刷新 Nginx。
+- `deploy/runtime/cloud-print-web.env` 必须由人工提前创建，脚本不再自动从示例文件复制默认值，以避免用错误默认配置直接上线。
 
