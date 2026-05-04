@@ -216,6 +216,10 @@ function App() {
   const [pdfBlobUrl, setPdfBlobUrl] = useState<string | null>(null)
   const [pdfLoading, setPdfLoading] = useState(false)
   const [pdfError, setPdfError] = useState('')
+  const [fontStatus, setFontStatus] = useState<{ compatible: boolean; missing: string[]; template_fonts: string[] } | null>(null)
+  const [checkingFonts, setCheckingFonts] = useState(false)
+  const [uploadingFont, setUploadingFont] = useState(false)
+  const [fontUploadMsg, setFontUploadMsg] = useState('')
 
   useEffect(() => {
     const persisted = readPersistedSession()
@@ -427,6 +431,7 @@ function App() {
         binding_kind: 'text',
       }))
       setFields(autoFields)
+      void handleFontCheck(templateId)
     } catch (err) {
       setScanError(err instanceof Error ? err.message : '扫描失败')
     } finally {
@@ -498,6 +503,8 @@ function App() {
     setActiveStep(1)
     setPdfBlobUrl(null)
     setPdfError('')
+    setFontStatus(null)
+    setFontUploadMsg('')
 
     if (!session) return
 
@@ -520,6 +527,7 @@ function App() {
           if (data.field_schema?.length) {
             setFields(data.field_schema as FieldDefinition[])
           }
+          void handleFontCheck(item.id)
         }
       }
 
@@ -534,6 +542,56 @@ function App() {
       }
     } catch {
       // silently ignore — user can re-scan
+    }
+  }
+
+  async function handleFontCheck(templateId: string) {
+    if (!session) return
+    setCheckingFonts(true)
+    try {
+      const resp = await fetch(`${session.apiBaseUrl}/api/v1/templates/${templateId}/font-check`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${session.accessToken}` },
+      })
+      if (resp.ok) {
+        const data = await resp.json()
+        setFontStatus(data)
+      }
+    } catch {
+      // ignore
+    } finally {
+      setCheckingFonts(false)
+    }
+  }
+
+  async function handleFontUpload(file: File) {
+    if (!session) return
+    setUploadingFont(true)
+    setFontUploadMsg('')
+    try {
+      const formData = new FormData()
+      formData.set('file', file)
+      const resp = await fetch(`${session.apiBaseUrl}/api/v1/system/fonts`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${session.accessToken}` },
+        body: formData,
+      })
+      if (resp.ok) {
+        setFontUploadMsg(`${file.name} 上传成功，字体将在下次 PDF 预览时生效。`)
+        // Re-check fonts for current template
+        if (activeTemplateId) {
+          await handleFontCheck(activeTemplateId)
+        }
+      } else {
+        const payload = await resp.json().catch(() => null) as { detail?: string } | null
+        setFontUploadMsg(payload?.detail === 'unsupported_font_format'
+          ? '仅支持 .ttf、.otf、.ttc 字体文件'
+          : '字体上传失败')
+      }
+    } catch {
+      setFontUploadMsg('字体上传失败，请检查后端服务。')
+    } finally {
+      setUploadingFont(false)
     }
   }
 
@@ -781,6 +839,32 @@ function App() {
                           ))}
                         </ul>
                       </details>
+                    )}
+                    {fontStatus && !fontStatus.compatible && (
+                      <div className="font-warning" style={{ marginTop: 14, padding: 16, borderRadius: 10, background: '#fef8e7', border: '1px solid #f0c36d' }}>
+                        <p style={{ margin: '0 0 8px', fontWeight: 700, color: '#b85c0e' }}>⚠ 字体兼容性警告</p>
+                        <p style={{ margin: '0 0 8px', fontSize: 13, color: '#5b5b5b' }}>
+                          模板使用了服务器上未安装的字体：<strong>{fontStatus.missing.join('、')}</strong>。
+                          PDF 预览可能出现排版偏移或字体回退。
+                        </p>
+                        <div style={{ display: 'flex', gap: 8 }}>
+                          <button type="button" className="ghost-button" style={{ fontSize: 13 }}
+                            onClick={() => setFontStatus({ ...fontStatus, compatible: true })}>
+                            使用替代字体继续
+                          </button>
+                          <label className="primary-button" style={{ fontSize: 13, cursor: 'pointer', display: 'inline-flex' }}>
+                            {uploadingFont ? '上传中...' : '上传缺失字体 (.ttf/.otf)'}
+                            <input type="file" accept=".ttf,.otf,.ttc" style={{ display: 'none' }}
+                              onChange={e => { const f = e.target.files?.[0]; if (f) handleFontUpload(f) }}
+                              disabled={uploadingFont} />
+                          </label>
+                        </div>
+                        {fontUploadMsg ? (
+                          <p className={fontUploadMsg.includes('成功') ? 'success-banner' : 'error-banner'} style={{ marginTop: 8 }}>
+                            {fontUploadMsg}
+                          </p>
+                        ) : null}
+                      </div>
                     )}
                     <div style={{ marginTop: 16 }}>
                       <button type="button" className="primary-button" onClick={() => setActiveStep(2)}>下一步：字段定义 →</button>
