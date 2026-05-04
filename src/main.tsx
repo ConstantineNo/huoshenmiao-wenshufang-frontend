@@ -125,10 +125,6 @@ type PreflightResult = {
   issues: ScanIssue[]
 }
 
-type PdfPageInfo = { page: number; width_pt: number; height_pt: number; width_mm: number; height_mm: number }
-type PdfInfo = { template_id: string; page_count: number; pages: PdfPageInfo[] }
-type FieldPosition = { field_key: string; label: string; page: number; x: number; y: number; width: number; font_name: string; font_size: number; align: string }
-
 const SESSION_STORAGE_KEY = 'cloud-print-web/admin-session'
 
 function normalizeApiBaseUrl(value: string) {
@@ -224,9 +220,6 @@ function App() {
   const [checkingFonts, setCheckingFonts] = useState(false)
   const [uploadingFont, setUploadingFont] = useState(false)
   const [fontUploadMsg, setFontUploadMsg] = useState('')
-  const [pdfInfo, setPdfInfo] = useState<PdfInfo | null>(null)
-  const [fieldPositions, setFieldPositions] = useState<FieldPosition[]>([])
-  const [savingPositions, setSavingPositions] = useState(false)
 
   useEffect(() => {
     const persisted = readPersistedSession()
@@ -484,28 +477,6 @@ function App() {
     }
   }
 
-  async function loadPdfInfo(templateId: string) {
-    if (!session) return
-    try {
-      const resp = await fetch(`${session.apiBaseUrl}/api/v1/templates/${templateId}/pdf-info`, {
-        headers: { Authorization: `Bearer ${session.accessToken}` },
-      })
-      if (resp.ok) setPdfInfo(await resp.json())
-    } catch { /* ignore */ }
-  }
-
-  async function saveFieldPositions(templateId: string) {
-    if (!session) return
-    setSavingPositions(true)
-    try {
-      await fetch(`${session.apiBaseUrl}/api/v1/templates/${templateId}/field-positions`, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${session.accessToken}` },
-        body: JSON.stringify({ positions: fieldPositions }),
-      })
-    } finally { setSavingPositions(false) }
-  }
-
   async function handlePreflight(templateId: string) {
     if (!session) return
     setRunningPreflight(true)
@@ -534,8 +505,6 @@ function App() {
     setPdfError('')
     setFontStatus(null)
     setFontUploadMsg('')
-    setPdfInfo(null)
-    setFieldPositions([])
 
     if (!session) return
 
@@ -570,10 +539,6 @@ function App() {
         if (previewData.rows?.length || previewData.columns?.length) {
           setTableDraft(previewData as TableDraftResponse)
         }
-      }
-
-      if (item.source_type === 'pdf_template') {
-        await loadPdfInfo(item.id)
       }
     } catch {
       // silently ignore — user can re-scan
@@ -679,8 +644,6 @@ function App() {
     setActiveStep(1)
     setPdfBlobUrl(null)
     setPdfError('')
-    setPdfInfo(null)
-    setFieldPositions([])
   }
 
   const activeTemplate = templates.find((t) => t.id === activeTemplateId)
@@ -839,172 +802,119 @@ function App() {
 
             <nav className="step-nav">
               <button className={activeStep === 1 ? 'active' : ''} onClick={() => setActiveStep(1)}>1. 扫描标记</button>
-              <button className={activeStep === 2 ? 'active' : ''} onClick={() => setActiveStep(2)} disabled={!scanResult && activeTemplate?.source_type !== 'pdf_template'}>2. {activeTemplate?.source_type === 'pdf_template' ? '字段位置' : '字段定义'}</button>
-              <button className={activeStep === 3 ? 'active' : ''} onClick={() => setActiveStep(3)} disabled={!scanResult && activeTemplate?.source_type !== 'pdf_template'}>3. 待打数据</button>
-              <button className={activeStep === 4 ? 'active' : ''} onClick={() => setActiveStep(4)} disabled={!scanResult && activeTemplate?.source_type !== 'pdf_template'}>4. 打印预览</button>
+              <button className={activeStep === 2 ? 'active' : ''} onClick={() => setActiveStep(2)} disabled={!scanResult}>2. 字段定义</button>
+              <button className={activeStep === 3 ? 'active' : ''} onClick={() => setActiveStep(3)} disabled={!scanResult}>3. 待打数据</button>
+              <button className={activeStep === 4 ? 'active' : ''} onClick={() => setActiveStep(4)} disabled={!scanResult}>4. 打印预览</button>
             </nav>
 
             {activeStep === 1 && (
               <div className="stage-panel">
-                {activeTemplate?.source_type === 'pdf_template' ? (
-                  <>
-                    <h3 style={{ margin: '0 0 4px' }}>PDF 模板信息</h3>
-                    <p className="upload-hint">已上传排版好的 PDF 模板，云端将在指定位置叠印文字。</p>
-                    {pdfInfo ? (
-                      <div style={{ marginTop: 14 }}>
-                        <div className="scan-stats">
-                          <div className="scan-stat"><span className="scan-stat-num">{pdfInfo.page_count}</span><span className="scan-stat-label">页数</span></div>
-                          {pdfInfo.pages.slice(0, 3).map(p => (
-                            <div className="scan-stat" key={p.page}>
-                              <span className="scan-stat-num" style={{ fontSize: 18 }}>{p.width_mm}×{p.height_mm}</span>
-                              <span className="scan-stat-label">第{p.page + 1}页 (mm)</span>
-                            </div>
-                          ))}
-                        </div>
-                      </div>
-                    ) : (
-                      <div style={{ marginTop: 16 }}>
-                        <button type="button" className="primary-button"
-                          onClick={() => loadPdfInfo(activeTemplate.id)}>
-                          加载页面信息
-                        </button>
-                      </div>
-                    )}
-                  </>
+                <h3 style={{ margin: '0 0 4px' }}>扫描标记</h3>
+                <p className="upload-hint">识别模板中的黄色高亮片段、占位符 [[field_key]] 和结构书签。</p>
+
+                {!scanResult ? (
+                  <div style={{ marginTop: 16 }}>
+                    <button type="button" className="primary-button" disabled={scanning}
+                      onClick={() => handleScanTemplate(activeTemplate.id, activeTemplate.template_version_id)}>
+                      {scanning ? '扫描中...' : '开始扫描'}
+                    </button>
+                    {scanError ? <p className="error-banner" style={{ marginTop: 10 }}>{scanError}</p> : null}
+                  </div>
                 ) : (
-                  <>
-                    <h3 style={{ margin: '0 0 4px' }}>扫描标记</h3>
-                    <p className="upload-hint">识别模板中的黄色高亮片段、占位符 [[field_key]] 和结构书签。</p>
-                    {!scanResult ? (
-                      <div style={{ marginTop: 16 }}>
-                        <button type="button" className="primary-button" disabled={scanning}
-                          onClick={() => handleScanTemplate(activeTemplate.id, activeTemplate.template_version_id)}>
-                          {scanning ? '扫描中...' : '开始扫描'}
-                        </button>
-                        {scanError ? <p className="error-banner" style={{ marginTop: 10 }}>{scanError}</p> : null}
+                  <div style={{ marginTop: 16 }}>
+                    <div className="scan-stats">
+                      <div className="scan-stat">
+                        <span className="scan-stat-num">{scanResult.editable_segments.length}</span>
+                        <span className="scan-stat-label">高亮片段</span>
                       </div>
-                    ) : (
-                      <div style={{ marginTop: 16 }}>
-                        <div className="scan-stats">
-                          <div className="scan-stat"><span className="scan-stat-num">{scanResult.editable_segments.length}</span><span className="scan-stat-label">高亮片段</span></div>
-                          <div className="scan-stat"><span className="scan-stat-num">{scanResult.found_placeholders.length}</span><span className="scan-stat-label">占位符</span></div>
-                          <div className="scan-stat"><span className="scan-stat-num">{scanResult.found_regions.length}</span><span className="scan-stat-label">结构书签</span></div>
-                          <div className={`scan-stat ${scanResult.issues.filter(i => i.severity === 'error').length > 0 ? 'warn' : ''}`}>
-                            <span className="scan-stat-num">{scanResult.issues.length}</span><span className="scan-stat-label">问题</span>
-                          </div>
+                      <div className="scan-stat">
+                        <span className="scan-stat-num">{scanResult.found_placeholders.length}</span>
+                        <span className="scan-stat-label">占位符</span>
+                      </div>
+                      <div className="scan-stat">
+                        <span className="scan-stat-num">{scanResult.found_regions.length}</span>
+                        <span className="scan-stat-label">结构书签</span>
+                      </div>
+                      <div className={`scan-stat ${scanResult.issues.filter(i => i.severity === 'error').length > 0 ? 'warn' : ''}`}>
+                        <span className="scan-stat-num">{scanResult.issues.length}</span>
+                        <span className="scan-stat-label">问题</span>
+                      </div>
+                    </div>
+                    {scanResult.issues.length > 0 && (
+                      <details style={{ marginTop: 10 }}>
+                        <summary style={{ cursor: 'pointer', fontSize: 13, color: 'var(--color-text-secondary)' }}>查看问题详情</summary>
+                        <ul className="issues-list">
+                          {scanResult.issues.map((iss, idx) => (
+                            <li key={idx} className={iss.severity === 'error' ? 'err' : 'warn'}>[{iss.severity}] {iss.message}</li>
+                          ))}
+                        </ul>
+                      </details>
+                    )}
+                    {fontStatus && (
+                      <div style={{ marginTop: 14, padding: 16, borderRadius: 10, border: '1px solid #e2e0db', background: '#fafaf9' }}>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
+                          <p style={{ margin: 0, fontWeight: 700, fontSize: 14 }}>
+                            {fontStatus.compatible ? '✓ 字体检查通过' : '⚠ 字体兼容性'}
+                          </p>
+                          <button type="button" className="ghost-button" style={{ fontSize: 12, height: 32 }}
+                            onClick={() => activeTemplateId && handleFontCheck(activeTemplateId)}>
+                            {checkingFonts ? '检查中...' : '重新检查'}
+                          </button>
                         </div>
-                        {scanResult.issues.length > 0 && (
-                          <details style={{ marginTop: 10 }}>
-                            <summary style={{ cursor: 'pointer', fontSize: 13, color: 'var(--color-text-secondary)' }}>查看问题详情</summary>
-                            <ul className="issues-list">
-                              {scanResult.issues.map((iss, idx) => (
-                                <li key={idx} className={iss.severity === 'error' ? 'err' : 'warn'}>[{iss.severity}] {iss.message}</li>
+                        {fontStatus.available.length > 0 && (
+                          <table style={{ width: '100%', borderCollapse: 'collapse', marginBottom: 8, fontSize: 12 }}>
+                            <tbody>
+                              {fontStatus.available.map(f => (
+                                <tr key={f.name}>
+                                  <td style={{ padding: '3px 8px', color: '#1b7a3d' }}>✓</td>
+                                  <td style={{ padding: '3px 0', fontWeight: 500 }}>{f.name}</td>
+                                  <td style={{ padding: '3px 8px', color: '#8894aa' }}>→ {f.resolved_to}</td>
+                                </tr>
                               ))}
-                            </ul>
-                          </details>
+                            </tbody>
+                          </table>
+                        )}
+                        {fontStatus.missing.length > 0 && (
+                          <>
+                            <table style={{ width: '100%', borderCollapse: 'collapse', marginBottom: 10, fontSize: 12 }}>
+                              <tbody>
+                                {fontStatus.missing.map(f => (
+                                  <tr key={f.name} style={{ borderBottom: '1px solid #efede8' }}>
+                                    <td style={{ padding: '3px 8px', color: '#c62828' }}>✗</td>
+                                    <td style={{ padding: '3px 0', fontWeight: 500 }}>{f.name}</td>
+                                    <td style={{ padding: '3px 8px', color: '#8894aa' }}>→ {f.substitute}</td>
+                                  </tr>
+                                ))}
+                              </tbody>
+                            </table>
+                            <div style={{ display: 'flex', gap: 8 }}>
+                              <label className="ghost-button" style={{ fontSize: 12, height: 34, cursor: 'pointer', display: 'inline-flex' }}>
+                                {uploadingFont ? '上传中...' : '上传字体 (.ttf/.otf)'}
+                                <input type="file" accept=".ttf,.otf,.ttc" style={{ display: 'none' }}
+                                  onChange={e => { const f = e.target.files?.[0]; if (f) handleFontUpload(f) }}
+                                  disabled={uploadingFont} />
+                              </label>
+                            </div>
+                          </>
+                        )}
+                        {fontUploadMsg && (
+                          <p className={fontUploadMsg.includes('成功') ? 'success-banner' : 'error-banner'} style={{ marginTop: 8 }}>
+                            {fontUploadMsg}
+                          </p>
                         )}
                       </div>
                     )}
-                  </>
-                )}
-                {fontStatus && (
-                  <div style={{ marginTop: 14, padding: 16, borderRadius: 10, border: '1px solid #e2e0db', background: '#fafaf9' }}>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
-                      <p style={{ margin: 0, fontWeight: 700, fontSize: 14 }}>
-                        {fontStatus.compatible ? '✓ 字体检查通过' : '⚠ 字体兼容性'}
-                      </p>
-                      <button type="button" className="ghost-button" style={{ fontSize: 12, height: 32 }}
-                        onClick={() => activeTemplateId && handleFontCheck(activeTemplateId)}>
-                        {checkingFonts ? '检查中...' : '重新检查'}
-                      </button>
+                    <div style={{ marginTop: 16 }}>
+                      <button type="button" className="primary-button" onClick={() => setActiveStep(2)}>下一步：字段定义 →</button>
                     </div>
-                    {fontStatus.available.length > 0 && (
-                      <table style={{ width: '100%', borderCollapse: 'collapse', marginBottom: 8, fontSize: 12 }}>
-                        <tbody>
-                          {fontStatus.available.map(f => (
-                            <tr key={f.name}><td style={{ padding: '3px 8px', color: '#1b7a3d' }}>✓</td><td style={{ padding: '3px 0', fontWeight: 500 }}>{f.name}</td><td style={{ padding: '3px 8px', color: '#8894aa' }}>→ {f.resolved_to}</td></tr>
-                          ))}
-                        </tbody>
-                      </table>
-                    )}
-                    {fontStatus.missing.length > 0 && (
-                      <>
-                        <table style={{ width: '100%', borderCollapse: 'collapse', marginBottom: 10, fontSize: 12 }}>
-                          <tbody>
-                            {fontStatus.missing.map(f => (
-                              <tr key={f.name} style={{ borderBottom: '1px solid #efede8' }}><td style={{ padding: '3px 8px', color: '#c62828' }}>✗</td><td style={{ padding: '3px 0', fontWeight: 500 }}>{f.name}</td><td style={{ padding: '3px 8px', color: '#8894aa' }}>→ {f.substitute}</td></tr>
-                            ))}
-                          </tbody>
-                        </table>
-                        <div style={{ display: 'flex', gap: 8 }}>
-                          <label className="ghost-button" style={{ fontSize: 12, height: 34, cursor: 'pointer', display: 'inline-flex' }}>
-                            {uploadingFont ? '上传中...' : '上传字体 (.ttf/.otf)'}
-                            <input type="file" accept=".ttf,.otf,.ttc" style={{ display: 'none' }}
-                              onChange={e => { const f = e.target.files?.[0]; if (f) handleFontUpload(f) }} disabled={uploadingFont} />
-                          </label>
-                        </div>
-                      </>
-                    )}
-                    {fontUploadMsg && (
-                      <p className={fontUploadMsg.includes('成功') ? 'success-banner' : 'error-banner'} style={{ marginTop: 8 }}>{fontUploadMsg}</p>
-                    )}
                   </div>
                 )}
-                <div style={{ marginTop: 16 }}>
-                  <button type="button" className="primary-button" onClick={() => setActiveStep(2)}>下一步：字段定义 →</button>
-                </div>
               </div>
             )}
 
-            {activeStep === 2 && (scanResult || activeTemplate?.source_type === 'pdf_template') && (
+            {activeStep === 2 && scanResult && (
               <div className="stage-panel">
-                {activeTemplate?.source_type === 'pdf_template' ? (
-                  <>
-                    <h3 style={{ margin: '0 0 4px' }}>字段位置</h3>
-                    <p className="upload-hint">定义每个字段在 PDF 页面上的叠印位置（单位：点 pt，1pt ≈ 0.353mm）。Y 坐标从页面底部算起。</p>
-                    <table className="draft-table" style={{ marginTop: 8 }}>
-                      <thead><tr>
-                        <th>field_key</th><th>标签</th><th>页</th><th>X</th><th>Y</th><th>字号</th><th>字体</th><th>对齐</th>
-                      </tr></thead>
-                      <tbody>
-                        {fieldPositions.map((fp, idx) => (
-                          <tr key={fp.field_key || idx}>
-                            <td><input className="cell-input" value={fp.field_key} onChange={e => {
-                              const n = [...fieldPositions]; n[idx] = {...n[idx], field_key: e.target.value}; setFieldPositions(n)
-                            }} /></td>
-                            <td><input className="cell-input" value={fp.label} onChange={e => {
-                              const n = [...fieldPositions]; n[idx] = {...n[idx], label: e.target.value}; setFieldPositions(n)
-                            }} /></td>
-                            <td><input className="cell-input cell-narrow" type="number" min={0} value={fp.page} onChange={e => {
-                              const n = [...fieldPositions]; n[idx] = {...n[idx], page: parseInt(e.target.value)||0}; setFieldPositions(n)
-                            }} /></td>
-                            <td><input className="cell-input cell-narrow" type="number" value={fp.x} onChange={e => {
-                              const n = [...fieldPositions]; n[idx] = {...n[idx], x: parseFloat(e.target.value)||0}; setFieldPositions(n)
-                            }} /></td>
-                            <td><input className="cell-input cell-narrow" type="number" value={fp.y} onChange={e => {
-                              const n = [...fieldPositions]; n[idx] = {...n[idx], y: parseFloat(e.target.value)||0}; setFieldPositions(n)
-                            }} /></td>
-                            <td><input className="cell-input cell-narrow" type="number" min={6} max={72} value={fp.font_size} onChange={e => {
-                              const n = [...fieldPositions]; n[idx] = {...n[idx], font_size: parseInt(e.target.value)||12}; setFieldPositions(n)
-                            }} /></td>
-                            <td><input className="cell-input" value={fp.font_name} onChange={e => {
-                              const n = [...fieldPositions]; n[idx] = {...n[idx], font_name: e.target.value}; setFieldPositions(n)
-                            }} placeholder="楷体" /></td>
-                            <td><select className="compact-select" value={fp.align} onChange={e => {
-                              const n = [...fieldPositions]; n[idx] = {...n[idx], align: e.target.value}; setFieldPositions(n)
-                            }}><option value="left">left</option><option value="center">center</option><option value="right">right</option></select></td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                    <div className="draft-actions">
-                      <button type="button" className="ghost-button" onClick={() => setFieldPositions([...fieldPositions, { field_key: '', label: '', page: 0, x: 100, y: 100, width: 0, font_name: '', font_size: 12, align: 'left' }])}>+ 添加字段</button>
-                      <button type="button" className="primary-button" disabled={savingPositions} onClick={() => { saveFieldPositions(activeTemplate.id); setActiveStep(3) }}>{savingPositions ? '保存中...' : '保存并继续'}</button>
-                    </div>
-                  </>
-                ) : (
-                  <>
-                    <h3 style={{ margin: '0 0 4px' }}>字段定义</h3>
+                <h3 style={{ margin: '0 0 4px' }}>字段定义</h3>
                 <p className="upload-hint">每个黄色高亮片段对应一个字段。请设置 field_key（小写 snake_case）和中文标签。</p>
                 <div className="field-editor-header">
                   <span>片段</span><span>field_key</span><span>标签</span><span>类型</span>
@@ -1043,12 +953,10 @@ function App() {
                     {preflightResult.passed ? '✓ 预检通过' : `✗ ${preflightResult.issues.length} 个问题待解决`}
                   </div>
                 )}
-                </>
-              )}
               </div>
             )}
 
-            {activeStep === 3 && (scanResult || activeTemplate?.source_type === 'pdf_template') && (
+            {activeStep === 3 && scanResult && (
               <div className="stage-panel">
                 <h3 style={{ margin: '0 0 4px' }}>待打数据</h3>
                 <p className="upload-hint">填写需要批量打印的数据行。点击「保存并预览」查看实际排版效果。</p>
@@ -1109,7 +1017,7 @@ function App() {
               </div>
             )}
 
-            {activeStep === 4 && (scanResult || activeTemplate?.source_type === 'pdf_template') && (
+            {activeStep === 4 && scanResult && (
               <div className="stage-panel">
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
                   <h3 style={{ margin: 0 }}>打印预览</h3>
