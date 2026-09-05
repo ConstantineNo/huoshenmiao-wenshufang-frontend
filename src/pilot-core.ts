@@ -43,6 +43,78 @@ export function validateArtifactValues(fields: { field_key: string; required: bo
   return ''
 }
 
+export function trustedSameOriginHttpsBaseUrl(value: string, pageOrigin: string) {
+  try {
+    const page = new URL(pageOrigin)
+    const candidate = new URL(value.trim(), page)
+    if (
+      page.protocol !== 'https:'
+      || candidate.protocol !== 'https:'
+      || candidate.origin !== page.origin
+      || candidate.username
+      || candidate.password
+      || candidate.search
+      || candidate.hash
+    ) {
+      return null
+    }
+    return candidate.href.replace(/\/$/, '')
+  } catch {
+    return null
+  }
+}
+
+export type LatestRequestTicket = {
+  signal: AbortSignal
+  isLatest: () => boolean
+  finish: () => void
+}
+
+export type LatestRequestGate = {
+  start: () => LatestRequestTicket
+  cancel: () => void
+}
+
+export function createLatestRequestGate(): LatestRequestGate {
+  let generation = 0
+  let controller: AbortController | null = null
+
+  return {
+    start() {
+      controller?.abort()
+      controller = new AbortController()
+      const requestController = controller
+      const requestGeneration = ++generation
+      return {
+        signal: requestController.signal,
+        isLatest: () => generation === requestGeneration && !requestController.signal.aborted,
+        finish: () => {
+          if (generation === requestGeneration) controller = null
+        },
+      }
+    },
+    cancel() {
+      generation += 1
+      controller?.abort()
+      controller = null
+    },
+  }
+}
+
+export function canSubmitPrint(input: {
+  hasArtifact: boolean
+  hasPreview: boolean
+  printerOnline: boolean
+  submitting: boolean
+  intentState: SubmissionIntent['state'] | null
+}) {
+  return input.hasArtifact
+    && input.hasPreview
+    && input.printerOnline
+    && !input.submitting
+    && input.intentState !== 'confirmed'
+}
+
 export const TASK_STATUS: Record<string, { label: string; tone: string; description: string }> = {
   READY: { label: '等待领取', tone: 'neutral', description: '任务已建立，等待现场打印服务领取。' },
   CLAIMED: { label: '已领取', tone: 'active', description: '现场打印服务已领取任务。' },

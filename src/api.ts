@@ -46,6 +46,7 @@ export async function requestPdf(url: string, init: RequestInit = {}) {
 }
 
 const ERROR_MESSAGES: Record<string, string> = {
+  secure_api_required: '普通用户入口只允许连接当前站点的 HTTPS 服务。',
   invalid_request: '请求内容不符合要求。',
   invalid_credentials: '用户名或密码错误。',
   invalid_token: '登录已失效，请重新登录。',

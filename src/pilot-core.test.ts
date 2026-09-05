@@ -1,5 +1,12 @@
 import { describe, expect, it } from 'vitest'
-import { getOrCreateSubmissionIntent, TASK_STATUS, validateArtifactValues } from './pilot-core'
+import {
+  canSubmitPrint,
+  createLatestRequestGate,
+  getOrCreateSubmissionIntent,
+  TASK_STATUS,
+  trustedSameOriginHttpsBaseUrl,
+  validateArtifactValues,
+} from './pilot-core'
 
 describe('controlled print submission intent', () => {
   it('reuses the same key after an uncertain response for the exact same intent', () => {
@@ -27,6 +34,45 @@ describe('artifact value limits', () => {
   it('accepts a bounded string field', () => {
     expect(validateArtifactValues([{ field_key: 'name', required: true }], { name: '测试用户' }))
       .toBe('')
+  })
+})
+
+describe('pilot API trust boundary', () => {
+  it('accepts only same-origin HTTPS without URL credentials or query data', () => {
+    expect(trustedSameOriginHttpsBaseUrl('https://print.1to.top', 'https://print.1to.top')).toBe('https://print.1to.top')
+    expect(trustedSameOriginHttpsBaseUrl('/backend', 'https://print.1to.top')).toBe('https://print.1to.top/backend')
+    expect(trustedSameOriginHttpsBaseUrl('http://127.0.0.1:18080', 'http://127.0.0.1:5173')).toBeNull()
+    expect(trustedSameOriginHttpsBaseUrl('https://api.print.1to.top', 'https://print.1to.top')).toBeNull()
+    expect(trustedSameOriginHttpsBaseUrl('https://user:secret@print.1to.top', 'https://print.1to.top')).toBeNull()
+  })
+})
+
+describe('latest task request gate', () => {
+  it('aborts the previous read and rejects its late SPOOL_BOUND response after RESULT_UNKNOWN', async () => {
+    const gate = createLatestRequestGate()
+    const older = gate.start()
+    const latest = gate.start()
+    const committed: string[] = []
+
+    await Promise.resolve()
+    if (latest.isLatest()) committed.push('RESULT_UNKNOWN')
+    await Promise.resolve()
+    if (older.isLatest()) committed.push('SPOOL_BOUND')
+
+    expect(older.signal.aborted).toBe(true)
+    expect(committed).toEqual(['RESULT_UNKNOWN'])
+  })
+})
+
+describe('printer availability fail closed', () => {
+  it('disables submission when a refresh removes the previously online printer', () => {
+    expect(canSubmitPrint({
+      hasArtifact: true,
+      hasPreview: true,
+      printerOnline: false,
+      submitting: false,
+      intentState: 'ready',
+    })).toBe(false)
   })
 })
 

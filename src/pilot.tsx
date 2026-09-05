@@ -1,6 +1,14 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { ApiError, describeError, isAbortError, isUncertainSubmissionError, requestJson, requestOk, requestPdf } from './api'
-import { getOrCreateSubmissionIntent, TASK_STATUS, type SubmissionIntent, validateArtifactValues } from './pilot-core'
+import {
+  canSubmitPrint,
+  createLatestRequestGate,
+  getOrCreateSubmissionIntent,
+  TASK_STATUS,
+  trustedSameOriginHttpsBaseUrl,
+  type SubmissionIntent,
+  validateArtifactValues,
+} from './pilot-core'
 
 type Profile = { id: string; user_name: string; status: string; nick_name?: string | null }
 type UserSession = { accessToken: string; apiBaseUrl: string; profile: Profile; scope: 'user' }
@@ -36,6 +44,7 @@ type PrintTask = {
 }
 
 const USER_SESSION_KEY = 'cloud-print-web/pilot-user-session'
+const CLAIM_TIMEOUT_MS = 15000
 
 function normalizeApiBaseUrl(value: string) {
   return value.trim().replace(/\/$/, '')
@@ -53,8 +62,14 @@ function readUserSession(): UserSession | null {
   if (!raw) return null
   try {
     const value = JSON.parse(raw) as UserSession
-    return value.accessToken && value.apiBaseUrl && value.profile?.id && value.scope === 'user' ? value : null
+    const trustedBase = trustedSameOriginHttpsBaseUrl(value.apiBaseUrl, window.location.origin)
+    if (value.accessToken && trustedBase && value.profile?.id && value.scope === 'user') {
+      return { ...value, apiBaseUrl: trustedBase }
+    }
+    window.sessionStorage.removeItem(USER_SESSION_KEY)
+    return null
   } catch {
+    window.sessionStorage.removeItem(USER_SESSION_KEY)
     return null
   }
 }
@@ -78,8 +93,9 @@ export function UserPortal({ openAdmin }: { openAdmin: () => void }) {
     event.preventDefault()
     setSubmitting(true)
     setError('')
-    const base = normalizeApiBaseUrl(apiBaseUrl)
+    const base = trustedSameOriginHttpsBaseUrl(apiBaseUrl, window.location.origin)
     try {
+      if (!base) throw new ApiError(400, 'secure_api_required')
       const payload = await requestJson<LoginResponse>(`${base}/api/v1/auth/user/password-login`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -129,6 +145,7 @@ export function UserPortal({ openAdmin }: { openAdmin: () => void }) {
           <label htmlFor="user-api-base">后端地址</label>
           <input id="user-api-base" value={apiBaseUrl} onChange={(event) => setApiBaseUrl(event.target.value)} autoComplete="url" />
         </div>
+        <p className="upload-hint">普通用户入口只连接当前站点的 HTTPS 服务；本地 HTTP 开发页不能提交真实账号或认领密钥。</p>
         <div className="field-group">
           <label htmlFor="pilot-user-name">用户名</label>
           <input id="pilot-user-name" value={userName} onChange={(event) => setUserName(event.target.value)} autoComplete="username" required />
@@ -157,6 +174,10 @@ function UserWorkbench({ session, logout }: { session: UserSession; logout: () =
   const [previewUrl, setPreviewUrl] = useState<string | null>(null)
   const previewUrlRef = useRef<string | null>(null)
   const previewAbortRef = useRef<AbortController | null>(null)
+  const claimAbortRef = useRef<AbortController | null>(null)
+  const claimTimerRef = useRef<number | null>(null)
+  const taskReadGate = useMemo(() => createLatestRequestGate(), [])
+  const printerReadGate = useMemo(() => createLatestRequestGate(), [])
   const [previewBusy, setPreviewBusy] = useState(false)
   const [previewError, setPreviewError] = useState('')
   const [intent, setIntent] = useState<SubmissionIntent | null>(null)
@@ -186,35 +207,44 @@ function UserWorkbench({ session, logout }: { session: UserSession; logout: () =
     setSubmitMessage('')
   }, [revokePreview])
 
-  const refreshTasks = useCallback(async (signal?: AbortSignal, quiet = false) => {
+  const refreshTasks = useCallback(async (quiet = false) => {
+    const ticket = taskReadGate.start()
     try {
       const payload = await requestJson<{ items: PrintTask[] }>(`${session.apiBaseUrl}/api/v1/pilot/tasks`, {
-        headers: authHeaders(session), signal,
+        headers: authHeaders(session), signal: ticket.signal,
       })
+      if (!ticket.isLatest()) return []
       setTasks(payload.items)
       setResourceErrors((current) => ({ ...current, tasks: '' }))
       return payload.items
     } catch (cause) {
-      if (!isAbortError(cause) && !quiet) {
+      if (ticket.isLatest() && !isAbortError(cause) && !quiet) {
         setResourceErrors((current) => ({ ...current, tasks: describeError(cause, '任务列表读取失败') }))
       }
       return []
+    } finally {
+      ticket.finish()
     }
-  }, [session])
+  }, [session, taskReadGate])
 
-  const refreshPrinters = useCallback(async (signal?: AbortSignal) => {
+  const refreshPrinters = useCallback(async () => {
+    const ticket = printerReadGate.start()
     try {
       const payload = await requestJson<{ items: PilotPrinter[] }>(`${session.apiBaseUrl}/api/v1/pilot/printers`, {
-        headers: authHeaders(session), signal,
+        headers: authHeaders(session), signal: ticket.signal,
       })
+      if (!ticket.isLatest()) return
       setPrinters(payload.items)
       setResourceErrors((current) => ({ ...current, printers: '' }))
     } catch (cause) {
-      if (!isAbortError(cause)) {
+      if (ticket.isLatest() && !isAbortError(cause)) {
+        setPrinters([])
         setResourceErrors((current) => ({ ...current, printers: describeError(cause, '打印机列表读取失败') }))
       }
+    } finally {
+      ticket.finish()
     }
-  }, [session])
+  }, [printerReadGate, session])
 
   useEffect(() => {
     const controller = new AbortController()
@@ -226,41 +256,41 @@ function UserWorkbench({ session, logout }: { session: UserSession; logout: () =
     }).catch((cause) => {
       if (!isAbortError(cause)) setResourceErrors((current) => ({ ...current, templates: describeError(cause, '模板列表读取失败') }))
     })
-    void refreshPrinters(controller.signal)
-    void refreshTasks(controller.signal)
-    return () => controller.abort()
-  }, [refreshPrinters, refreshTasks, session])
+    void refreshPrinters()
+    void refreshTasks()
+    return () => {
+      controller.abort()
+      taskReadGate.cancel()
+      printerReadGate.cancel()
+    }
+  }, [printerReadGate, refreshPrinters, refreshTasks, session, taskReadGate])
 
   useEffect(() => {
-    let controller: AbortController | null = null
     const timer = window.setInterval(() => {
-      controller?.abort()
-      controller = new AbortController()
-      void refreshTasks(controller.signal, true)
+      void refreshTasks(true)
     }, 5000)
     return () => {
       window.clearInterval(timer)
-      controller?.abort()
     }
   }, [refreshTasks])
 
   useEffect(() => {
-    let controller: AbortController | null = null
     const timer = window.setInterval(() => {
-      controller?.abort()
-      controller = new AbortController()
-      void refreshPrinters(controller.signal)
+      void refreshPrinters()
     }, 10000)
     return () => {
       window.clearInterval(timer)
-      controller?.abort()
     }
   }, [refreshPrinters])
 
   useEffect(() => () => {
     previewAbortRef.current?.abort()
+    claimAbortRef.current?.abort()
+    taskReadGate.cancel()
+    printerReadGate.cancel()
+    if (claimTimerRef.current !== null) window.clearTimeout(claimTimerRef.current)
     if (previewUrlRef.current) URL.revokeObjectURL(previewUrlRef.current)
-  }, [])
+  }, [printerReadGate, taskReadGate])
 
   function chooseTemplate(templateId: string) {
     invalidateArtifact()
@@ -324,25 +354,76 @@ function UserWorkbench({ session, logout }: { session: UserSession; logout: () =
 
   async function claimAgent(event: React.FormEvent) {
     event.preventDefault()
+    const secureBase = trustedSameOriginHttpsBaseUrl(session.apiBaseUrl, window.location.origin)
+    let ownershipKey = claim.ownershipKey
+    let requestBody = ''
+    if (!secureBase) {
+      setClaim((current) => ({ ...current, ownershipKey: '' }))
+      ownershipKey = ''
+      setClaimMessage(describeError(new ApiError(400, 'secure_api_required'), '认领失败'))
+      return
+    }
+
+    claimAbortRef.current?.abort()
+    if (claimTimerRef.current !== null) window.clearTimeout(claimTimerRef.current)
+    const controller = new AbortController()
+    claimAbortRef.current = controller
+    let timedOut = false
+    requestBody = JSON.stringify({
+      ownership_key: ownershipKey,
+      expected_ownership_generation: Number(claim.generation),
+      expected_authorization_revision: Number(claim.revision),
+    })
+    setClaim((current) => ({ ...current, ownershipKey: '' }))
     setClaimBusy(true)
     setClaimMessage('')
+    const timeoutId = window.setTimeout(() => {
+      timedOut = true
+      controller.abort()
+    }, CLAIM_TIMEOUT_MS)
+    claimTimerRef.current = timeoutId
     try {
-      await requestJson(`${session.apiBaseUrl}/api/v1/agents/${encodeURIComponent(claim.agentId.trim())}/claim`, {
+      await requestJson(`${secureBase}/api/v1/agents/${encodeURIComponent(claim.agentId.trim())}/claim`, {
         method: 'POST', headers: authHeaders(session, true),
-        body: JSON.stringify({
-          ownership_key: claim.ownershipKey,
-          expected_ownership_generation: Number(claim.generation),
-          expected_authorization_revision: Number(claim.revision),
-        }),
+        body: requestBody,
+        signal: controller.signal,
       })
       setClaimMessage('认领成功，正在刷新可用打印机。')
       await refreshPrinters()
     } catch (cause) {
-      setClaimMessage(describeError(cause, '认领失败'))
+      if (claimAbortRef.current === controller) {
+        if (isAbortError(cause)) {
+          setClaimMessage(timedOut ? '认领请求超时，密钥已从页面清除。' : '认领请求已取消，密钥已从页面清除。')
+        } else {
+          setClaimMessage(describeError(cause, '认领失败'))
+        }
+      }
     } finally {
-      setClaim((current) => ({ ...current, ownershipKey: '' }))
-      setClaimBusy(false)
+      ownershipKey = ''
+      requestBody = ''
+      window.clearTimeout(timeoutId)
+      if (claimTimerRef.current === timeoutId) {
+        claimTimerRef.current = null
+      }
+      if (claimAbortRef.current === controller) {
+        claimAbortRef.current = null
+        setClaimBusy(false)
+      }
     }
+  }
+
+  function handleLogout() {
+    claimAbortRef.current?.abort()
+    claimAbortRef.current = null
+    if (claimTimerRef.current !== null) {
+      window.clearTimeout(claimTimerRef.current)
+      claimTimerRef.current = null
+    }
+    setClaim((current) => ({ ...current, ownershipKey: '' }))
+    previewAbortRef.current?.abort()
+    taskReadGate.cancel()
+    printerReadGate.cancel()
+    logout()
   }
 
   async function submitPrint() {
@@ -368,6 +449,7 @@ function UserWorkbench({ session, logout }: { session: UserSession; logout: () =
       const confirmed = { ...next, state: 'confirmed' as const }
       intentRef.current = confirmed
       setIntent(confirmed)
+      taskReadGate.cancel()
       setTasks((current) => [task, ...current.filter((item) => item.task_id !== task.task_id)])
       setSubmitMessage('任务已创建。请根据任务状态判断队列结果。')
     } catch (cause) {
@@ -379,7 +461,7 @@ function UserWorkbench({ session, logout }: { session: UserSession; logout: () =
       setSubmitMessage(uncertain
         ? '提交响应中断，结果可能未知。系统没有自动再次提交；请先刷新任务列表，必要时再明确使用原提交标识重试。'
         : describeError(cause, '打印任务提交失败'))
-      const latest = await refreshTasks(undefined, true)
+      const latest = await refreshTasks(true)
       const recovered = latest.find((task) => task.artifact_id === artifact.artifact_id
         && task.agent_id === selectedPrinter.agent_id && task.printer_name === selectedPrinter.printer_name)
       if (recovered) {
@@ -394,11 +476,19 @@ function UserWorkbench({ session, logout }: { session: UserSession; logout: () =
   }
 
   async function refreshTask(taskId: string) {
+    const ticket = taskReadGate.start()
     try {
-      const task = await requestJson<PrintTask>(`${session.apiBaseUrl}/api/v1/pilot/tasks/${encodeURIComponent(taskId)}`, { headers: authHeaders(session) })
+      const task = await requestJson<PrintTask>(`${session.apiBaseUrl}/api/v1/pilot/tasks/${encodeURIComponent(taskId)}`, {
+        headers: authHeaders(session), signal: ticket.signal,
+      })
+      if (!ticket.isLatest()) return
       setTasks((current) => current.map((item) => item.task_id === task.task_id ? task : item))
     } catch (cause) {
-      setResourceErrors((current) => ({ ...current, tasks: describeError(cause, '任务状态读取失败') }))
+      if (ticket.isLatest() && !isAbortError(cause)) {
+        setResourceErrors((current) => ({ ...current, tasks: describeError(cause, '任务状态读取失败') }))
+      }
+    } finally {
+      ticket.finish()
     }
   }
 
@@ -417,7 +507,13 @@ function UserWorkbench({ session, logout }: { session: UserSession; logout: () =
   const currentTask = useMemo(() => artifact
     ? tasks.find((task) => task.artifact_id === artifact.artifact_id) ?? null
     : null, [artifact, tasks])
-  const canPrint = Boolean(artifact && previewUrl && selectedPrinter?.online && !submitBusy && intent?.state !== 'confirmed')
+  const canPrint = canSubmitPrint({
+    hasArtifact: Boolean(artifact),
+    hasPreview: Boolean(previewUrl),
+    printerOnline: Boolean(selectedPrinter?.online),
+    submitting: submitBusy,
+    intentState: intent?.state ?? null,
+  })
 
   return (
     <section className="dashboard-shell pilot-shell">
@@ -429,7 +525,7 @@ function UserWorkbench({ session, logout }: { session: UserSession; logout: () =
         </div>
         <div className="topbar-actions">
           <div className="identity-chip"><span className="identity-label">当前用户</span><strong>{session.profile.user_name}</strong><span className="identity-meta">{session.profile.status}</span></div>
-          <button type="button" className="ghost-button" onClick={logout} disabled={submitBusy || claimBusy}>退出登录</button>
+          <button type="button" className="ghost-button" onClick={handleLogout}>退出登录</button>
         </div>
       </header>
 
