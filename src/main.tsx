@@ -1,11 +1,12 @@
 import React, { useEffect, useState } from 'react'
 import ReactDOM from 'react-dom/client'
+import { AdminPilotPanel, UserPortal } from './pilot'
 import './styles.css'
 
 type AdminProfile = {
   id: string
   user_name: string
-  nick_name: string | null
+  nick_name?: string | null
   status: string
 }
 
@@ -21,6 +22,7 @@ type PersistedSession = {
   accessToken: string
   profile: AdminProfile
   apiBaseUrl: string
+  scope: 'admin'
 }
 
 type TemplateSummary = {
@@ -172,7 +174,7 @@ function readPersistedSession(): PersistedSession | null {
 
   try {
     const parsed = JSON.parse(raw) as PersistedSession
-    if (!parsed.accessToken || !parsed.profile || !parsed.apiBaseUrl) {
+    if (!parsed.accessToken || !parsed.profile || !parsed.apiBaseUrl || parsed.scope !== 'admin') {
       return null
     }
     parsed.apiBaseUrl = preferSameOriginApiBaseUrl(parsed.apiBaseUrl)
@@ -191,9 +193,9 @@ function persistSession(session: PersistedSession | null) {
   window.localStorage.setItem(SESSION_STORAGE_KEY, JSON.stringify(session))
 }
 
-function App() {
+function App({ openUser }: { openUser: () => void }) {
   const [apiBaseUrl, setApiBaseUrl] = useState(readDefaultApiBaseUrl)
-  const [userName, setUserName] = useState('admin_test')
+  const [userName, setUserName] = useState('')
   const [password, setPassword] = useState('')
   const [session, setSession] = useState<PersistedSession | null>(null)
   const [isSubmitting, setIsSubmitting] = useState(false)
@@ -358,10 +360,14 @@ function App() {
       }
 
       const payload = (await response.json()) as LoginResponse
+      if (payload.scope !== 'admin' || payload.token_type !== 'bearer' || !payload.access_token || !payload.profile?.id) {
+        throw new Error('登录身份与管理员入口不匹配。')
+      }
       const nextSession: PersistedSession = {
         accessToken: payload.access_token,
         profile: payload.profile,
         apiBaseUrl: normalizedApiBaseUrl,
+        scope: 'admin',
       }
       persistSession(nextSession)
       setSession(nextSession)
@@ -813,6 +819,8 @@ function App() {
           )}
         </article>
 
+        <AdminPilotPanel session={session} templates={templates} />
+
         <article className="panel-card wide-card">
           <p className="panel-kicker">模板中心</p>
           <div className="template-workspace">
@@ -1205,7 +1213,7 @@ function App() {
             id="user-name"
             value={userName}
             onChange={(event) => setUserName(event.target.value)}
-            placeholder="admin_test"
+            placeholder="请输入管理员账号"
             autoComplete="username"
           />
         </div>
@@ -1222,13 +1230,12 @@ function App() {
           />
         </div>
 
-        <p className="upload-hint">默认测试管理员示例：admin_test / Test123456!</p>
-
         {errorMessage ? <p className="error-banner">{errorMessage}</p> : null}
 
         <button type="submit" className="primary-button" disabled={isSubmitting}>
           {isSubmitting ? '登录中...' : '进入管理台'}
         </button>
+        <button type="button" className="text-button" onClick={openUser}>普通用户入口</button>
       </form>
     </section>
   )
@@ -1240,8 +1247,24 @@ function App() {
   )
 }
 
+function PortalApp() {
+  const [mode, setMode] = useState(() => window.location.hash === '#user' ? 'user' : 'admin')
+
+  useEffect(() => {
+    const syncMode = () => setMode(window.location.hash === '#user' ? 'user' : 'admin')
+    window.addEventListener('hashchange', syncMode)
+    return () => window.removeEventListener('hashchange', syncMode)
+  }, [])
+
+  const openUser = () => { window.location.hash = 'user' }
+  const openAdmin = () => { window.location.hash = 'admin' }
+  return mode === 'user'
+    ? <main className="app-shell"><UserPortal openAdmin={openAdmin} /></main>
+    : <App openUser={openUser} />
+}
+
 ReactDOM.createRoot(document.getElementById('root')!).render(
   <React.StrictMode>
-    <App />
+    <PortalApp />
   </React.StrictMode>,
 )

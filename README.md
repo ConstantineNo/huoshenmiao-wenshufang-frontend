@@ -1,6 +1,6 @@
 # Cloud Print Web
 
-远程前端客户端。
+远程前端客户端，当前版本 `0.2.0`。
 
 职责：
 
@@ -11,9 +11,11 @@
 
 当前阶段目标：
 
-- 先建立最小 Vite + React + TypeScript 骨架
-- 后续按 docs 仓中的云边端 CONTRACT 对接 REST API
-- 当前已接入最小管理员登录入口，可调用 backend 的 `/api/v1/auth/admin/login` 并在浏览器持久化登录态
+- 保留管理员模板上传、扫描、字段配置和 PDF 预览工作台
+- 管理员可以创建普通用户，并把已配置的 DOCX 制作稿作为独立快照分配给用户
+- 普通用户使用密码登录，在独立工作台中认领 Agent、填写模板、预览受保护 PDF、选择在线打印机和查询任务
+- 打印提交使用浏览器生成的幂等键；网络响应中断时保留原键并先查询任务，不自动重复提交
+- `RESULT_UNKNOWN` 需要用户单独确认可能重复出纸，确认后重新查询原任务
 - 生产环境默认优先走当前站点同源地址，再由 Nginx 通过 `/api/` 反代到 backend，避免浏览器跨域与私网访问限制
 
 部署策略：
@@ -29,7 +31,9 @@
 开发启动建议：
 
 ```powershell
-npm install
+npm ci
+npm test
+npm run build
 npm run dev
 ```
 
@@ -40,12 +44,17 @@ npm run dev
 
 当前 Web 入口状态：
 
-- 已提供管理员登录页。
+- 首页提供普通用户与管理员两个登录入口，服务端返回的 scope 必须与入口匹配。
 - 登录成功后会把 access token、管理员资料与 API Base URL 持久化到浏览器 localStorage。
 - 页面刷新后会自动恢复最近一次管理员登录态。
 - 登录后的管理台当前已接入模板上传表单和模板列表，可直接验证 Web 到 backend 的第一段业务链路。
-- 当前登录页默认测试管理员示例为 `admin_test / Test123456!`，实际可用值仍以服务器真实 env 中的 bootstrap admin 配置为准。
+- 普通用户会话只保存在当前标签页的 sessionStorage；Agent 所有权密钥只存在于表单内，并在请求结束后清除。
+- 用户内容或模板变化会立即使旧 artifact 和 PDF object URL 失效；新预览建立新的打印意图。
+- 固定打印参数为 A4 纵向、适合可打印区域、300 dpi、彩色、单面、1 份且不自动旋转。
+- `QUEUE_DELIVERED` 只显示“队列已交付”，不表示设备已经出纸。
 - 若浏览器里保存过旧的 `https://api.print.1to.top` 登录态，当前版本会在 `print.1to.top` 下自动迁回同源地址。
+
+功能分支 `feature/**` 的 push 会执行依赖安装、定向测试和构建，但部署 job 仍只允许 `main` 或 `master` 的 push 触发。
 
 服务端部署入口：
 
